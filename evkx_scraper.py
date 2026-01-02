@@ -1,16 +1,15 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Jan  2 16:17:17 2026
-
-@author: qiyuan.zhou
-"""
-
 import requests
 from bs4 import BeautifulSoup
 import sqlite3
 import time
 import re
 from urllib.parse import urljoin
+import urllib3
+
+# --- SSL FIX ---
+# Disable SSL warnings to keep the output clean when verify=False is used
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# ---------------
 
 # Configuration
 BASE_URL = "https://evkx.net/models/"
@@ -69,7 +68,8 @@ def setup_database():
 def get_soup(url):
     """Fetches a URL and returns a BeautifulSoup object."""
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
+        # verify=False bypasses the SSL error
+        response = requests.get(url, headers=HEADERS, timeout=20, verify=False)
         response.raise_for_status()
         return BeautifulSoup(response.content, 'html.parser')
     except requests.RequestException as e:
@@ -79,13 +79,15 @@ def get_soup(url):
 def clean_text(text):
     """Cleans whitespace from text."""
     if text:
-        return text.strip()
+        return text.replace("Go to ", "").replace(" EV-model overview", "").strip()
+        
     return ""
 
 def extract_number(text):
     """Extracts the first floating point number from a string."""
     if not text:
         return None
+    # Removes non-numeric characters except dots, then parses
     match = re.search(r"(\d+(\.\d+)?)", text)
     return float(match.group(1)) if match else None
 
@@ -96,20 +98,19 @@ def scrape_makes():
         return []
     
     makes = []
-    # Identify links to brand pages (heuristic based on page structure)
-    # Looking for links that likely point to /models/{brand}/
-    # Adjust selector based on actual site structure
     for link in soup.find_all('a', href=True):
         href = link['href']
-        if '/models/' in href and href.count('/') == 4: # e.g., https://evkx.net/models/audi/
+        # Check for standard make URL patterns
+        if '/models/' in href and href.count('/') == 3 and href[:7] == '/models':
             full_url = urljoin(BASE_URL, href)
-            make_name = clean_text(link.text)
+            make_name = link.text.replace("Go to ", "").replace(" EV-model overview", "").strip()
+            
+            # Filter out navigational garbage if any
             if full_url not in [m['url'] for m in makes] and make_name:
                 makes.append({'name': make_name, 'url': full_url})
+
     
-    # De-duplicate based on URL
-    unique_makes = {v['url']: v for v in makes}.values()
-    return list(unique_makes)
+    return list({v['url']: v for v in makes}.values())[:-1]
 
 def scrape_models(make_url):
     """Scrapes the list of Model URLs from a Make page."""
@@ -118,17 +119,17 @@ def scrape_models(make_url):
         return []
     
     models = []
-    # Similar logic: find links to model pages
+    make = make_url.rstrip("/").split("/")[-1]
     for link in soup.find_all('a', href=True):
         href = link['href']
-        # e.g., /models/audi/q4_e-tron/
-        if make_url in urljoin(BASE_URL, href) and href.count('/') >= 5:
+        if make_url in urljoin(BASE_URL, href) and href.count('/') == 4 and make in href:
             full_url = urljoin(BASE_URL, href)
-            model_name = clean_text(link.text)
-            if "model info" in model_name.lower() or "go to" in model_name.lower():
-                continue # Skip navigation links if they are just buttons
+            model_name = href.rstrip("/").split("/")[-1]
             
-            # Often the link text is the model name
+            # Ignore "Go to..." buttons
+            if "go to" in model_name.lower() or "overview" in model_name.lower():
+                continue
+
             if full_url != make_url and full_url not in [m['url'] for m in models]:
                 models.append({'name': model_name, 'url': full_url})
                 
@@ -141,9 +142,6 @@ def scrape_variants(model_url):
         return []
     
     variants = []
-    # Check if this page lists variants or IS the variant page (single variant models)
-    # Heuristic: Look for links that extend the current URL
-    
     links = soup.find_all('a', href=True)
     found_variants = False
     
@@ -151,23 +149,21 @@ def scrape_variants(model_url):
         href = link['href']
         full_url = urljoin(BASE_URL, href)
         
-        # If the link is a sub-path of the model URL, it's likely a variant
+        # Check if link is a child of the model URL
         if model_url.rstrip('/') in full_url and len(full_url) > len(model_url):
-            # Exclude standard sub-pages like gallery, reviews, etc.
-            if any(x in full_url for x in ['gallery', 'reviews', 'specifications', 'chargingcurve', 'range']):
+            # Exclude tabs/sub-sections
+            if any(x in full_url for x in ['gallery', 'reviews','range','chargingcurve','specifications']):
                 continue
             
-            variant_name = clean_text(link.text)
-            if variant_name and full_url not in [v['url'] for v in variants]:
+            variant_name = full_url.rstrip("/").split("/")[-1]
+            # Filter out generic link text
+            if variant_name.lower() in ["read more", "details", ""]:
+                continue
+
+            if full_url not in [v['url'] for v in variants]:
                 variants.append({'name': variant_name, 'url': full_url})
                 found_variants = True
                 
-    # If no sub-variants found, the model URL might be the only variant
-    if not found_variants:
-        # We assume the model name is the variant name
-        # Need to re-fetch or pass model name down
-        pass # Logic handled in main loop if list is empty
-        
     return variants
 
 def parse_charging_curve(variant_url, vehicle_id, cursor):
@@ -177,26 +173,30 @@ def parse_charging_curve(variant_url, vehicle_id, cursor):
     if not soup:
         return
 
-    # Find the table with charging data
-    # Heuristic: Table containing "SOC" and "kW"
     tables = soup.find_all('table')
     target_table = None
     
+    # Find table with SOC and Speed headers
     for table in tables:
         headers = [th.get_text().strip().lower() for th in table.find_all('th')]
-        if 'soc' in headers and 'speed' in headers:
+        if any('soc' in h for h in headers) and any('speed' in h for h in headers):
             target_table = table
             break
             
     if target_table:
-        rows = target_table.find_all('tr')[1:] # Skip header
+        rows = target_table.find_all('tr')[1:]
         for row in rows:
             cols = row.find_all('td')
-            if len(cols) >= 4:
-                soc = extract_number(cols[0].text)
-                power = extract_number(cols[1].text)
+            if len(cols) >= 3:
+                # Layout varies, usually SOC | Power | Time | Energy
+                soc_txt = cols[0].text
+                power_txt = cols[1].text
                 time_val = clean_text(cols[2].text)
-                energy = extract_number(cols[3].text)
+                energy_txt = cols[3].text if len(cols) > 3 else "0"
+                
+                soc = extract_number(soc_txt)
+                power = extract_number(power_txt)
+                energy = extract_number(energy_txt)
                 
                 if soc is not None and power is not None:
                     cursor.execute('''
@@ -205,36 +205,76 @@ def parse_charging_curve(variant_url, vehicle_id, cursor):
                     ''', (vehicle_id, soc, power, time_val, energy))
 
 def parse_range_data(variant_url, vehicle_id, cursor):
-    """Fetches and parses range scenarios."""
-    # Try the 'range' sub-page
-    url = urljoin(variant_url, "range/")
-    soup = get_soup(url)
+    """Fetches and parses range scenarios from rangeandconsumption page."""
+    # Prioritize the 'rangeandconsumption' page as requested
+    target_urls = [urljoin(variant_url, "rangeandconsumption/"), urljoin(variant_url, "range/")]
     
+    soup = None
+    for url in target_urls:
+        soup = get_soup(url)
+        if soup:
+            break
+            
     if not soup:
-        # Fallback: check the main page or 'rangeandconsumption' if exists
         return
 
-    # Look for tables defining scenarios (City, Highway, etc.)
-    # This is highly specific to the site layout; heuristic used here
-    tables = soup.find_all('table')
-    for table in tables:
-        text_content = table.get_text().lower()
-        if 'km/h' in text_content or 'city' in text_content or 'highway' in text_content:
-            rows = table.find_all('tr')
-            for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 2:
-                    scenario = clean_text(cols[0].text)
-                    val_text = clean_text(cols[1].text)
+    # Function to extract data from a list of rows
+    def process_rows(rows):
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 2:
+                scenario = clean_text(cols[0].text)
+                range_val = None
+                consumption_val = None
+                
+                # Check columns for range and consumption data
+                # Typically cols[1] is Range or Consumption depending on table type
+                for col in cols[1:]:
+                    text = col.get_text().strip().lower()
+                    val = extract_number(text)
+                    if val is None:
+                        continue
                     
-                    # Heuristic to separate range from consumption if in same cell or adjacent
-                    range_val = extract_number(val_text)
-                    
-                    if range_val and range_val > 50: # Simple filter to avoid consumption figures (usually < 30 kWh)
-                         cursor.execute('''
-                            INSERT INTO range_scenarios (vehicle_id, scenario_name, range_km)
-                            VALUES (?, ?, ?)
-                        ''', (vehicle_id, scenario, range_val))
+                    # Heuristics to distinguish Range vs Consumption
+                    if 'kwh' in text:
+                        consumption_val = val
+                    elif 'km' in text:
+                        range_val = val
+                    elif 'mi' in text:
+                        pass # Ignore miles, prefer KM (assumed to be present if miles are)
+                    else:
+                        # If no unit text, guess based on magnitude
+                        # Consumption usually < 40, Range usually > 50
+                        if val > 45: 
+                            if range_val is None: range_val = val
+                        else:
+                            if consumption_val is None: consumption_val = val
+
+                if range_val:
+                     cursor.execute('''
+                        INSERT INTO range_scenarios (vehicle_id, scenario_name, range_km, consumption_kwh_100km)
+                        VALUES (?, ?, ?, ?)
+                    ''', (vehicle_id, scenario, range_val, consumption_val))
+
+    # Targeted approach: Find tables following specific headers
+    target_headers = ["official test cycle", "real world range"]
+    headers = soup.find_all(['h2', 'h3', 'h4', 'h5'])
+    processed_count = 0
+    
+    for h in headers:
+        if any(target in h.get_text().lower() for target in target_headers):
+            table = h.find_next('table')
+            if table:
+                process_rows(table.find_all('tr'))
+                processed_count += 1
+                
+    # Fallback: If no targeted headers found, use generic table scanning
+    if processed_count == 0:
+        tables = soup.find_all('table')
+        for table in tables:
+            text_content = table.get_text().lower()
+            if 'km/h' in text_content or 'wltp' in text_content or 'epa' in text_content:
+                process_rows(table.find_all('tr'))
 
 def scrape_variant_details(variant_url, make, model, variant_name, cursor, conn):
     """Main function to process a specific variant."""
@@ -243,62 +283,47 @@ def scrape_variant_details(variant_url, make, model, variant_name, cursor, conn)
     if not soup:
         return
 
-    # 1. Extract Basic Specs (Battery, WLTP) from Main Page
+    text = soup.get_text()
+    
+    # 1. Basic Specs
     battery_gross = None
     battery_net = None
     wltp_range = None
     
-    # Search for "Specifications" section or Data Blocks
-    # Using regex to find text patterns in the page content
-    text = soup.get_text()
-    
-    # Battery
-    gross_match = re.search(r'Gross capacity[:\s]+([\d\.]+) kWh', text, re.IGNORECASE)
-    if gross_match:
-        battery_gross = float(gross_match.group(1))
+    # Regex extraction
+    gross_match = re.search(r'(?:Gross capacity|Gross battery).*?([\d\.]+)\s*kWh', text, re.IGNORECASE)
+    if gross_match: battery_gross = float(gross_match.group(1))
         
-    net_match = re.search(r'Net capacity[:\s]+([\d\.]+) kWh', text, re.IGNORECASE) # Or "usable capacity"
-    if not net_match:
-        net_match = re.search(r'usable capacity[:\s]+([\d\.]+) kWh', text, re.IGNORECASE)
-    if net_match:
-        battery_net = float(net_match.group(1))
+    net_match = re.search(r'(?:Net capacity|Usable capacity|Net battery).*?([\d\.]+)\s*kWh', text, re.IGNORECASE)
+    if net_match: battery_net = float(net_match.group(1))
         
-    # WLTP Range
-    wltp_match = re.search(r'WLTP range.*?([\d]+)\s*km', text, re.IGNORECASE)
-    if wltp_match:
-        wltp_range = float(wltp_match.group(1))
+    wltp_match = re.search(r'WLTP.*?range.*?([\d]+)\s*km', text, re.IGNORECASE)
+    if wltp_match: wltp_range = float(wltp_match.group(1))
 
-    # Insert Vehicle Record
+    # Insert Vehicle
     cursor.execute('''
         INSERT OR IGNORE INTO vehicles (make, model, variant, variant_url, battery_gross_kwh, battery_net_kwh, wltp_range_km)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     ''', (make, model, variant_name, variant_url, battery_gross, battery_net, wltp_range))
     
     vehicle_id = cursor.lastrowid
-    
-    # If vehicle already existed (ignore), fetch its ID
-    if vehicle_id == 0: 
+    if vehicle_id == 0:
         cursor.execute('SELECT id FROM vehicles WHERE variant_url = ?', (variant_url,))
-        result = cursor.fetchone()
-        if result:
-            vehicle_id = result[0]
-        else:
-            return
+        res = cursor.fetchone()
+        if res: vehicle_id = res[0]
+        else: return
 
-    # 2. Extract Charging Curve
+    # 2. Details
     parse_charging_curve(variant_url, vehicle_id, cursor)
-    
-    # 3. Extract Range Scenarios
     parse_range_data(variant_url, vehicle_id, cursor)
 
     conn.commit()
-    time.sleep(1) # Be polite
 
 def main():
     conn = setup_database()
     cursor = conn.cursor()
     
-    print("Starting scrape of EVKX.net...")
+    print("Starting scrape of EVKX.net (SSL Verification Disabled)...")
     
     makes = scrape_makes()
     print(f"Found {len(makes)} makes.")
@@ -310,9 +335,9 @@ def main():
         for model in models:
             variants = scrape_variants(model['url'])
             
-            # If no variants found, treat the model page as the variant
             if not variants:
-                 scrape_variant_details(model['url'], make['name'], model['name'], model['name'], cursor, conn)
+                # Sometimes the model page IS the variant page
+                scrape_variant_details(model['url'], make['name'], model['name'], model['name'], cursor, conn)
             else:
                 for variant in variants:
                     scrape_variant_details(variant['url'], make['name'], model['name'], variant['name'], cursor, conn)
