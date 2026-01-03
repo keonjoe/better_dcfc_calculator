@@ -78,7 +78,7 @@ dist-ssr
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EV Charging Calculator</title>
+    <title>A Better DCFC Charging Calculator</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
   </head>
   <body>
@@ -427,8 +427,23 @@ export default function EVChargingCalculator() {
   const [curveMultiplier, setCurveMultiplier] = useState(1.0); // Multiplier for custom mode
   const [curveData, setCurveData] = useState([]); // Final curve used for display/calc
 
+  // Comparison
+  const [comparisonScenarios, setComparisonScenarios] = useState([]);
+
   // --- Formatters ---
-  const formatLabel = (str) => str ? str.toString().replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : '';
+  const formatLabel = (str) => {
+    if (!str) return '';
+    return str.toString()
+      .replace(/_/g, ' ')
+      .split(' ')
+      .map(word => {
+        // Capitalize entire word if it's less than 3 characters
+        if (word.length < 4) return word.toUpperCase();
+        // Otherwise just capitalize first letter
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      })
+      .join(' ');
+  };
 
   // --- DB Initialization ---
   useEffect(() => {
@@ -574,6 +589,40 @@ export default function EVChargingCalculator() {
       }
   };
 
+  const addToComparison = () => {
+    // Validate that all dropdowns have selections
+    if (!selectedMake || !selectedModel || !selectedVariant) {
+      alert('Please select a vehicle (Make, Model, and Variant) before adding to comparison.');
+      return;
+    }
+    
+    const variantObj = variants.find(v => String(v.id) === String(selectedVariant));
+    const variantName = variantObj?.name || '';
+    const scenario = {
+      id: Date.now(),
+      make: selectedMake,
+      model: selectedModel,
+      variant: variantName,
+      batterySize,
+      maxRange,
+      startSoc,
+      stopSoc,
+      chargerPower,
+      timeMins: result.timeMins,
+      kwhAdded: result.kwhAdded,
+      rangeAdded: result.rangeAdded,
+      rangeAddedKm: result.rangeAddedKm,
+      avgSpeed: result.avgSpeed,
+      avgSpeedMph: result.avgSpeedMph,
+      avgSpeedKph: result.avgSpeedKph
+    };
+    setComparisonScenarios([...comparisonScenarios, scenario]);
+  };
+
+  const removeFromComparison = (id) => {
+    setComparisonScenarios(comparisonScenarios.filter(s => s.id !== id));
+  };
+
   // --- Calculations ---
   const result = useMemo(() => {
     const safeStart = Math.min(startSoc, 99);
@@ -620,7 +669,11 @@ export default function EVChargingCalculator() {
       const totalSeconds = totalMins * 60;
       const m = Math.floor(totalSeconds / 60);
       const s = Math.floor(totalSeconds % 60);
-      return `${m}m ${s}s`;
+      return (
+        <span>
+          {m}<span className="text-[10px]">m</span> {s}<span className="text-[10px]">s</span>
+        </span>
+      );
   };
 
   return (
@@ -633,7 +686,7 @@ export default function EVChargingCalculator() {
             <div>
               <h1 className="text-2xl font-bold flex items-center justify-start gap-2">
                 <Zap className="text-blue-600 dark:text-blue-400" fill="currentColor" />
-                EV Charging Calculator
+                A Better DCFC Charging Calculator
               </h1>
               <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Based on data from EVKX</p>
             </div>
@@ -918,8 +971,83 @@ export default function EVChargingCalculator() {
                   </div>
                 </Card>
               </div>
+
+              {/* Add to Comparison Button */}
+              <div className="flex justify-center mt-4">
+                <button
+                  onClick={addToComparison}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg font-medium transition-colors shadow-sm"
+                >
+                  <Database size={16} />
+                  Add to Comparison
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* Comparison Table */}
+          {comparisonScenarios.length > 0 && (
+            <div className="mt-8">
+              <Card className="p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Comparison Table</h2>
+                  <button
+                    onClick={() => setComparisonScenarios([])} 
+                    className="text-xs text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400"
+                  >
+                    Clear All
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b-2 border-slate-200 dark:border-slate-700">
+                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Vehicle</th>
+                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Battery</th>
+                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Range</th>
+                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">SoC</th>
+                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charger</th>
+                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
+                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Range Added</th>
+                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Avg Speed</th>
+                        <th className="py-2 px-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparisonScenarios.map((scenario) => (
+                        <tr key={scenario.id} className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
+                          <td className="py-3 px-2">
+                            <div className="font-medium text-slate-800 dark:text-slate-100">
+                              {formatLabel(scenario.make)} {formatLabel(scenario.model)}
+                            </div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400">{formatLabel(scenario.variant)}</div>
+                          </td>
+                          <td className="py-3 px-2"><span className="text-slate-700 dark:text-slate-200">{scenario.batterySize}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> kWh</span></td>
+                          <td className="py-3 px-2"><span className="text-slate-700 dark:text-slate-200">{scenario.maxRange}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi</span></td>
+                          <td className="py-3 px-2"><span className="text-slate-700 dark:text-slate-200">{scenario.startSoc}</span><span className="text-[10px] text-slate-700 dark:text-slate-200">%</span><span className="text-slate-700 dark:text-slate-200"> → </span><span className="text-slate-700 dark:text-slate-200">{scenario.stopSoc}</span><span className="text-[10px] text-slate-700 dark:text-slate-200">%</span></td>
+                          <td className="py-3 px-2"><span className="text-slate-700 dark:text-slate-200">{scenario.chargerPower}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> kW</span></td>
+                          <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">{formatTime(scenario.timeMins)}</td>
+                          <td className="py-3 px-2">
+                            <div><span className="text-slate-700 dark:text-slate-200">{scenario.rangeAdded.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi</span></div>
+                            <div><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.rangeAddedKm.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km</span></div>
+                          </td>
+                          <td className="py-3 px-2">
+                            <div><span className="text-slate-700 dark:text-slate-200">{scenario.avgSpeed.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> kW</span></div>
+                            <div><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedMph.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> mph</span><span className="text-slate-500 dark:text-slate-400 text-xs"> / </span><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedKph.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
+                          </td>
+                          <td className="py-3 px-2">
+                            <button onClick={() => removeFromComparison(scenario.id)} className="text-slate-400 hover:text-red-600 dark:hover:text-red-400">
+                              <X size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+          )}
         </div>
       </div>
     </div>
