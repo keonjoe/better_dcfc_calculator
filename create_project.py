@@ -772,7 +772,11 @@ export default function EVChargingCalculator() {
     }
     
     const variantObj = variants.find(v => String(v.id) === String(selectedVariant));
-    const variantName = variantObj?.name || '';
+    let variantName = variantObj?.name || '';
+    // Add 'Custom' prefix if in custom mode
+    if (mode === 'custom') {
+      variantName = variantName ? `Custom - ${variantName}` : 'Custom';
+    }
     const scenario = {
       id: Date.now(),
       make: selectedMake,
