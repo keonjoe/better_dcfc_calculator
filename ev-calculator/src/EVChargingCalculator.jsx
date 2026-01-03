@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Battery, Zap, Clock, MapPin, Settings, Info, Upload, Database, ChevronDown, List, Loader2, Edit3, X, Sun, Moon } from 'lucide-react';
+import { Battery, Zap, Clock, MapPin, Settings, Info, Upload, Database, ChevronDown, List, Loader2, Edit3, X, Sun, Moon, Linkedin } from 'lucide-react';
 
 const Card = ({ children, className = "" }) => (
   <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 ${className}`}>
@@ -46,7 +46,7 @@ const NumberInput = ({ label, value, onChange, unit, disabled }) => (
   </div>
 );
 
-const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, darkMode }) => {
+const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, darkMode, isCustomMode, onCurveEdit, editedPoints, setEditedPoints, onClearEdits }) => {
   const width = 600;
   const height = 300;
   const padding = { top: 20, right: 30, bottom: 40, left: 50 };
@@ -54,6 +54,7 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
   const graphHeight = height - padding.top - padding.bottom;
   const svgRef = useRef(null);
   const [tooltip, setTooltip] = useState(null);
+  const [draggedPointIndex, setDraggedPointIndex] = useState(null);
 
   // Theme colors
   const theme = {
@@ -192,12 +193,78 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
       setTooltip(null);
   };
 
+  const handlePointMouseDown = (e, index) => {
+    if (!isCustomMode) return;
+    e.stopPropagation();
+    setDraggedPointIndex(index);
+    // Mark this point as edited
+    setEditedPoints(prev => new Set([...prev, index]));
+  };
+
+  const smoothCurveAround = (newCurveData, centerIndex, centerKw) => {
+    // Apply smoothing to neighboring points
+    const smoothRadius = 5; // Number of points on each side to smooth
+    const result = [...newCurveData];
+    
+    // Set the center point
+    result[centerIndex] = { ...result[centerIndex], kw: centerKw };
+    
+    // Simple smooth falloff for neighboring points
+    for (let i = Math.max(0, centerIndex - smoothRadius); i <= Math.min(newCurveData.length - 1, centerIndex + smoothRadius); i++) {
+      if (i === centerIndex || editedPoints.has(i)) continue;
+      
+      const distance = Math.abs(i - centerIndex);
+      // Use cubic easing for smooth transition
+      const t = distance / (smoothRadius + 1);
+      const easing = 1 - Math.pow(1 - t, 3); // Ease-out cubic
+      
+      const originalKw = newCurveData[i].kw;
+      const targetKw = centerKw;
+      result[i] = { ...result[i], kw: originalKw * easing + targetKw * (1 - easing) };
+    }
+    
+    return result;
+  };
+
+  const handlePointDrag = (e) => {
+    if (!isCustomMode || draggedPointIndex === null) return;
+    if (!svgRef.current) return;
+    
+    const rect = svgRef.current.getBoundingClientRect();
+    const mouseY = e.clientY - rect.top;
+    const svgY = (mouseY / rect.height) * height;
+    
+    // Convert to kW value
+    const newKw = Math.max(0, Math.min(maxKw, ((height - padding.bottom - svgY) / graphHeight) * maxKw));
+    
+    // Update curve data with smoothing
+    let newCurveData = [...safeCurveData];
+    newCurveData = smoothCurveAround(newCurveData, draggedPointIndex, newKw);
+    
+    onCurveEdit(newCurveData);
+  };
+
+  const handlePointMouseUp = () => {
+    setDraggedPointIndex(null);
+  };
+
+  useEffect(() => {
+    if (draggedPointIndex !== null) {
+      window.addEventListener('mousemove', handlePointDrag);
+      window.addEventListener('mouseup', handlePointMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handlePointDrag);
+        window.removeEventListener('mouseup', handlePointMouseUp);
+      };
+    }
+  }, [draggedPointIndex, safeCurveData, maxKw]);
+
   return (
     <div className={`w-full overflow-hidden rounded-lg border shadow-inner ${theme.chartBg} transition-colors duration-200 relative`}>
       <svg 
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`} 
-        className="w-full h-auto cursor-crosshair"
+        className={`w-full h-auto ${isCustomMode ? 'cursor-default' : 'cursor-crosshair'}`}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
       >
@@ -250,6 +317,67 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
             </g>
         )}
 
+        {/* Editable points in custom mode - only show edited points */}
+        {isCustomMode && safeCurveData.map((point, index) => {
+          if (!editedPoints.has(index)) return null;
+          return (
+            <circle
+              key={`point-${index}`}
+              cx={xScale(point.soc)}
+              cy={yScale(point.kw)}
+              r="6"
+              fill={draggedPointIndex === index ? "#3b82f6" : "#60a5fa"}
+              stroke="white"
+              strokeWidth="2"
+              className="cursor-ns-resize hover:fill-blue-600 transition-colors"
+              onMouseDown={(e) => handlePointMouseDown(e, index)}
+            />
+          );
+        })}
+
+        {/* Invisible clickable areas for all points in custom mode */}
+        {isCustomMode && safeCurveData.map((point, index) => (
+          <circle
+            key={`clickarea-${index}`}
+            cx={xScale(point.soc)}
+            cy={yScale(point.kw)}
+            r="12"
+            fill="transparent"
+            className="cursor-ns-resize"
+            onMouseDown={(e) => handlePointMouseDown(e, index)}
+          />
+        ))}
+
+        {/* Clear Edits Button */}
+        {isCustomMode && editedPoints.size > 0 && (
+          <g>
+            <rect
+              x={width / 2 - 40}
+              y={height - padding.bottom + 10}
+              width="80"
+              height="22"
+              rx="4"
+              fill="white"
+              fillOpacity="0.9"
+              stroke="#dc2626"
+              strokeWidth="1"
+              className="cursor-pointer"
+              onClick={onClearEdits}
+            />
+            <text
+              x={width / 2}
+              y={height - padding.bottom + 25}
+              textAnchor="middle"
+              fontSize="12"
+              fill="#dc2626"
+              fontWeight="600"
+              className="cursor-pointer pointer-events-none"
+            >
+              Clear Edits
+            </text>
+          </g>
+        )}
+
         <defs>
           <linearGradient id="gradient" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.5" />
@@ -296,6 +424,8 @@ export default function EVChargingCalculator() {
   const [rawDbCurve, setRawDbCurve] = useState([]); // Curve directly from DB
   const [curveMultiplier, setCurveMultiplier] = useState(1.0); // Multiplier for custom mode
   const [curveData, setCurveData] = useState([]); // Final curve used for display/calc
+  const [userEditedCurve, setUserEditedCurve] = useState(null); // User modifications
+  const [editedPointsSet, setEditedPointsSet] = useState(new Set()); // Track edited points
 
   // Comparison
   const [comparisonScenarios, setComparisonScenarios] = useState([]);
@@ -367,6 +497,10 @@ export default function EVChargingCalculator() {
   useEffect(() => {
     if (!db || !selectedVariant) return;
 
+    // Reset user edits when variant changes
+    setUserEditedCurve(null);
+    setEditedPointsSet(new Set());
+
     try {
       // 1. Get Charging Curve
       const curveRes = db.exec(`SELECT soc_percent, power_kw, energy_charged_kwh FROM charging_curve WHERE vehicle_id = '${selectedVariant}' ORDER BY soc_percent ASC`);
@@ -411,9 +545,9 @@ export default function EVChargingCalculator() {
             }));
             setRangeScenarios(scenarios);
             
-            // Set Default
-            let defIdx = scenarios.findIndex(s => s.scenario_name && s.scenario_name.toLowerCase().includes('wltp'));
-            if (defIdx === -1) defIdx = 0;
+            // Set Default - prioritize "120kph/75mph range in perfect condition"
+            let defIdx = scenarios.findIndex(s => s.scenario_name && s.scenario_name.toLowerCase().includes('120kmh/75mph range in perfect condition'));
+            if (defIdx === -1) defIdx = 0; // Fallback to first option
             setSelectedScenarioIndex(defIdx);
             
             // Apply Database Values Only if in Database Mode
@@ -438,18 +572,44 @@ export default function EVChargingCalculator() {
   // --- Effect: Handle Curve Logic based on Mode/Inputs ---
   useEffect(() => {
       if (mode === 'database') {
-          // Reset multiplier if we go back to DB
+          // Reset multiplier and user edits if we go back to DB
           setCurveMultiplier(1.0);
+          setUserEditedCurve(null);
+          setEditedPointsSet(new Set());
           // Curve is already set by variant selection effect
           if (rawDbCurve.length > 0) setCurveData(rawDbCurve);
       } else {
-          // Custom Mode - Apply multiplier to reference DB curve
+          // Custom Mode - Apply multiplier to reference DB curve or user edited curve
           if (rawDbCurve.length > 0) {
-              const multiplied = rawDbCurve.map(p => ({...p, kw: p.kw * curveMultiplier}));
-              setCurveData(multiplied);
+              if (userEditedCurve) {
+                  // Apply multiplier to user-edited curve
+                  const multiplied = userEditedCurve.map(p => ({...p, kw: p.kw * curveMultiplier}));
+                  setCurveData(multiplied);
+              } else {
+                  // Apply multiplier to reference DB curve
+                  const multiplied = rawDbCurve.map(p => ({...p, kw: p.kw * curveMultiplier}));
+                  setCurveData(multiplied);
+              }
           }
       }
-  }, [mode, curveMultiplier, rawDbCurve]);
+  }, [mode, curveMultiplier, rawDbCurve, userEditedCurve]);
+
+  const handleCurveEdit = (newCurveData) => {
+    // Store the edited curve without multiplier (base values)
+    const baseCurve = newCurveData.map(p => ({...p, kw: p.kw / curveMultiplier}));
+    setUserEditedCurve(baseCurve);
+    setCurveData(newCurveData);
+  };
+
+  const clearCurveEdits = () => {
+    setUserEditedCurve(null);
+    setEditedPointsSet(new Set());
+    // Reset to base curve with multiplier
+    if (rawDbCurve.length > 0) {
+      const multiplied = rawDbCurve.map(p => ({...p, kw: p.kw * curveMultiplier}));
+      setCurveData(multiplied);
+    }
+  };
 
   const handleScenarioChange = (idx) => {
       setSelectedScenarioIndex(idx);
@@ -487,6 +647,30 @@ export default function EVChargingCalculator() {
       avgSpeedKph: result.avgSpeedKph
     };
     setComparisonScenarios([...comparisonScenarios, scenario]);
+  };
+
+  const surpriseMe = () => {
+    if (!db || makes.length === 0) return;
+    
+    // Select random make
+    const randomMake = makes[Math.floor(Math.random() * makes.length)];
+    setSelectedMake(randomMake);
+    
+    // Get models for this make
+    const res = db.exec(`SELECT DISTINCT model FROM vehicles WHERE make = '${randomMake}' ORDER BY model ASC`);
+    if (res.length > 0) {
+      const modelsList = res[0].values.map(v => v[0]);
+      const randomModel = modelsList[Math.floor(Math.random() * modelsList.length)];
+      setSelectedModel(randomModel);
+      
+      // Get variants for this model
+      const varRes = db.exec(`SELECT id, variant FROM vehicles WHERE make = '${randomMake}' AND model = '${randomModel}'`);
+      if (varRes.length > 0) {
+        const variantsList = varRes[0].values.map(v => ({ id: v[0], name: v[1] }));
+        const randomVariant = variantsList[Math.floor(Math.random() * variantsList.length)];
+        setSelectedVariant(randomVariant.id);
+      }
+    }
   };
 
   const removeFromComparison = (id) => {
@@ -615,10 +799,18 @@ export default function EVChargingCalculator() {
                     </button>
                   </div>
 
-                  <h3 className="font-bold text-sm mb-3 flex items-center gap-2">
-                    <Settings size={16} className={mode === 'database' ? "text-slate-400" : "text-purple-400"} />
-                    {mode === 'database' ? 'Select Vehicle' : 'Reference Curve'}
-                  </h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-bold text-sm flex items-center gap-2">
+                      <Settings size={16} className={mode === 'database' ? "text-slate-400" : "text-purple-400"} />
+                      {mode === 'database' ? 'Select Vehicle' : 'Reference Curve'}
+                    </h3>
+                    <button
+                      onClick={surpriseMe}
+                      className="text-[10px] px-2 py-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded transition-colors font-medium"
+                    >
+                      Surprise Me!
+                    </button>
+                  </div>
                   
                   <div className="space-y-2">
                     <div>
@@ -772,9 +964,14 @@ export default function EVChargingCalculator() {
                   stopSoc={stopSoc} 
                   chargerMaxPower={chargerPower}
                   darkMode={darkMode}
+                  isCustomMode={mode === 'custom'}
+                  onCurveEdit={handleCurveEdit}
+                  editedPoints={editedPointsSet}
+                  setEditedPoints={setEditedPointsSet}
+                  onClearEdits={clearCurveEdits}
                 />
 
-                <div className="mt-12 px-2 relative h-12 select-none">
+                <div className="mt-6 px-2 relative h-12 select-none">
                   <div className="absolute top-1/2 left-0 right-0 h-2 bg-slate-200 dark:bg-slate-700 rounded-full -translate-y-1/2"></div>
                   <div 
                     className="absolute top-1/2 h-2 bg-blue-500 rounded-full -translate-y-1/2"
@@ -795,13 +992,13 @@ export default function EVChargingCalculator() {
                     className="absolute top-1/2 -translate-y-1/2 left-0 w-full h-2 bg-transparent appearance-none pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-4 [&::-webkit-slider-thumb]:border-amber-500 [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab z-30"
                   />
                   <div 
-                    className="absolute top-8 transform -translate-x-1/2 font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm transition-all"
+                    className="absolute top-8 transform -translate-x-1/2 font-mono font-bold text-emerald-600 dark:text-emerald-400 text-base transition-all"
                     style={{ left: `${startSoc}%` }}
                   >
                     {startSoc}%
                   </div>
                   <div 
-                    className="absolute top-8 transform -translate-x-1/2 font-mono font-bold text-amber-500 dark:text-amber-400 text-sm transition-all"
+                    className="absolute top-8 transform -translate-x-1/2 font-mono font-bold text-amber-500 dark:text-amber-400 text-base transition-all"
                     style={{ left: `${stopSoc}%` }}
                   >
                     {stopSoc}%
@@ -842,8 +1039,8 @@ export default function EVChargingCalculator() {
                 </Card>
               </div>
 
-              {/* Add to Comparison Button */}
-              <div className="flex justify-center mt-4">
+              {/* Add to Comparison Button and Credits */}
+              <div className="flex justify-between items-center mt-4">
                 <button
                   onClick={addToComparison}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg font-medium transition-colors shadow-sm"
@@ -851,6 +1048,18 @@ export default function EVChargingCalculator() {
                   <Database size={16} />
                   Add to Comparison
                 </button>
+                
+                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  <span>Made by Qiyuan Zhou</span>
+                  <a 
+                    href="https://www.linkedin.com/in/keonjoe/" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                  >
+                    <Linkedin size={16} />
+                  </a>
+                </div>
               </div>
             </div>
           </div>
