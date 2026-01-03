@@ -300,13 +300,16 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
 
     const socRaw = ((svgX - padding.left) / graphWidth) * 100;
     const soc = Math.max(0, Math.min(100, socRaw));
-    const kw = getKwAt(soc);
+    const idealKw = getKwAt(soc);
+    const realKw = Math.min(idealKw, chargerMaxPower);
     
     setTooltip({
         x: svgX,
-        y: yScale(kw),
+        yReal: yScale(realKw),
+        yIdeal: yScale(idealKw),
         soc: soc,
-        kw: kw
+        idealKw: idealKw,
+        realKw: realKw
     });
   };
 
@@ -356,11 +359,18 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
         {tooltip && (
             <g pointerEvents="none">
                 <line x1={tooltip.x} y1={padding.top} x2={tooltip.x} y2={height - padding.bottom} stroke={theme.text} strokeWidth="1" strokeDasharray="2 2" opacity="0.5" />
-                <circle cx={tooltip.x} cy={tooltip.y} r="5" fill="#3b82f6" stroke="white" strokeWidth="2" />
-                <g transform={`translate(${tooltip.x < width / 2 ? tooltip.x + 15 : tooltip.x - 115}, ${tooltip.y < height / 2 ? tooltip.y : tooltip.y - 65})`}>
-                    <rect width="100" height="55" rx="6" fill={theme.tooltipBg} stroke={theme.grid} strokeWidth="1" filter="drop-shadow(0 4px 6px rgb(0 0 0 / 0.3))" />
-                    <text x="10" y="20" fontSize="11" fill={theme.text} fontWeight="normal">SoC: {Math.round(tooltip.soc)}%</text>
-                    <text x="10" y="40" fontSize="14" fill="#3b82f6" fontWeight="bold">{Math.round(tooltip.kw)} kW</text>
+                {/* Ideal circle (behind, gray) */}
+                <circle cx={tooltip.x} cy={tooltip.yIdeal} r="5" fill="#94a3b8" stroke="white" strokeWidth="2" />
+                {/* Real circle (in front, blue) */}
+                <circle cx={tooltip.x} cy={tooltip.yReal} r="5" fill="#3b82f6" stroke="white" strokeWidth="2" />
+                <g transform={`translate(${tooltip.x < width / 2 ? tooltip.x + 15 : tooltip.x - 135}, ${tooltip.yReal < height / 2 ? tooltip.yReal : tooltip.yReal - 85})`}>
+                    <rect width="120" height="75" rx="6" fill={theme.tooltipBg} stroke={theme.grid} strokeWidth="1" filter="drop-shadow(0 4px 6px rgb(0 0 0 / 0.3))" />
+                    <text x="10" y="18" fontSize="11" fill={theme.text} fontWeight="normal">SoC: {Math.round(tooltip.soc)}%</text>
+                    <line x1="10" y1="25" x2="110" y2="25" stroke={theme.grid} strokeWidth="1" />
+                    <text x="10" y="40" fontSize="10" fill={theme.text} fontWeight="normal">Ideal:</text>
+                    <text x="110" y="40" fontSize="12" fill="#94a3b8" fontWeight="bold" textAnchor="end">{Math.round(tooltip.idealKw)} kW</text>
+                    <text x="10" y="60" fontSize="10" fill={theme.text} fontWeight="normal">Real:</text>
+                    <text x="110" y="60" fontSize="14" fill="#3b82f6" fontWeight="bold" textAnchor="end">{Math.round(tooltip.realKw)} kW</text>
                 </g>
             </g>
         )}
