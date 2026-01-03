@@ -102,6 +102,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 @tailwind components;
 @tailwind utilities;
 
+/* Reduce tooltip delay for faster appearance */
+[title] {
+  position: relative;
+}
+
 /* Limit dropdown menu height to match chart height (300px) */
 @layer utilities {
   .dropdown-limited {
@@ -388,6 +393,7 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
 
 export default function EVChargingCalculator() {
   const [darkMode, setDarkMode] = useState(true); // Default to dark mode
+  const [showTooltip, setShowTooltip] = useState(false);
   const [db, setDb] = useState(null);
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -632,12 +638,21 @@ export default function EVChargingCalculator() {
               <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Based on data from EVKX</p>
             </div>
             
-            <button 
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-2 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-            >
-              {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
+            <div className="relative">
+              <button 
+                onClick={() => setDarkMode(!darkMode)}
+                onMouseEnter={() => setShowTooltip(true)}
+                onMouseLeave={() => setShowTooltip(false)}
+                className="p-2 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+              {showTooltip && (
+                <div className="absolute top-full right-0 mt-2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded whitespace-nowrap pointer-events-none z-50">
+                  {darkMode ? "Prepare to be blinded!" : "Join the dark side!"}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Reduce tooltip delay for faster appearance */
+[title] {
+  position: relative;
+}
+
 /* Limit dropdown menu height to match chart height (300px) */
 @layer utilities {
   .dropdown-limited {
