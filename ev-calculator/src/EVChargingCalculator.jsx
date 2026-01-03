@@ -998,7 +998,7 @@ export default function EVChargingCalculator() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-bold text-sm flex items-center gap-2">
                     <Battery size={16} className="text-slate-400" />
-                    Specs {mode === 'custom' && <Edit3 size={12} className="text-purple-400 ml-1" />}
+                    Scenario {mode === 'custom' && <Edit3 size={12} className="text-purple-400 ml-1" />}
                   </h3>
                   <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 rounded p-0.5">
                     <button
