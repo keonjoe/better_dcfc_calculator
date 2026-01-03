@@ -136,7 +136,7 @@ function App() {
 export default App""",
 
     "src/EVChargingCalculator.jsx": """import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Battery, Zap, Clock, MapPin, Settings, Info, Upload, Database, ChevronDown, List, Loader2, Edit3, X, Sun, Moon, Linkedin } from 'lucide-react';
+import { Battery, Zap, Clock, MapPin, Settings, Info, Upload, Database, ChevronDown, List, Loader2, Edit3, X, Sun, Moon, Linkedin, Activity } from 'lucide-react';
 
 const Card = ({ children, className = "" }) => (
   <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 ${className}`}>
@@ -564,8 +564,15 @@ export default function EVChargingCalculator() {
   const [userEditedCurve, setUserEditedCurve] = useState(null); // User modifications
   const [editedPointsSet, setEditedPointsSet] = useState(new Set()); // Track edited points
 
+  // Road Trip Mode
+  const [tripMode, setTripMode] = useState('single'); // 'single' or 'roadtrip'
+  const [tripDistance, setTripDistance] = useState(500);
+  const [tripDistanceUnit, setTripDistanceUnit] = useState('mi'); // 'mi' or 'km'
+  const [drivingSpeed, setDrivingSpeed] = useState(70); // mph - only used in custom mode
+
   // Comparison
   const [comparisonScenarios, setComparisonScenarios] = useState([]);
+  const [comparisonViewMode, setComparisonViewMode] = useState('single'); // 'single' or 'roadtrip'
 
   // --- Formatters ---
   const formatLabel = (str) => {
@@ -580,6 +587,31 @@ export default function EVChargingCalculator() {
         return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
       })
       .join(' ');
+  };
+
+  // Extract driving speed from scenario name
+  const getScenarioSpeed = (scenarioName) => {
+    if (!scenarioName) return 70; // Default fallback
+    
+    const lowerName = scenarioName.toLowerCase();
+    
+    // Check for WLTP scenarios - use 29 mph
+    if (lowerName.includes('wltp')) return 29;
+    
+    // Check for EPA scenarios - use 48 mph
+    if (lowerName.includes('epa')) return 48;
+    
+    // Try to extract speed from scenario name (e.g., "120kmh/75mph" or "90kmh")
+    // Look for mph first
+    const mphMatch = scenarioName.match(/(\\d+)\\s*mph/i);
+    if (mphMatch) return parseInt(mphMatch[1]);
+    
+    // Look for kmh and convert to mph
+    const kmhMatch = scenarioName.match(/(\\d+)\\s*k[mp]h/i);
+    if (kmhMatch) return Math.round(parseInt(kmhMatch[1]) * 0.621371);
+    
+    // Default to 70 mph if no speed found
+    return 70;
   };
 
   // --- DB Initialization ---
@@ -793,7 +825,16 @@ export default function EVChargingCalculator() {
       rangeAddedKm: result.rangeAddedKm,
       avgSpeed: result.avgSpeed,
       avgSpeedMph: result.avgSpeedMph,
-      avgSpeedKph: result.avgSpeedKph
+      avgSpeedKph: result.avgSpeedKph,
+      // Road trip data
+      isRoadTrip: tripMode === 'roadtrip',
+      tripDistance: tripMode === 'roadtrip' ? tripDistance : null,
+      tripDistanceUnit: tripMode === 'roadtrip' ? tripDistanceUnit : null,
+      roadTripStops: tripMode === 'roadtrip' ? roadTripResult.numStops : null,
+      roadTripStopTime: tripMode === 'roadtrip' ? roadTripResult.totalStopTime : null,
+      roadTripLostDistance: tripMode === 'roadtrip' ? roadTripResult.totalStopDistance : null,
+      roadTripAvgSpeed: tripMode === 'roadtrip' ? roadTripResult.avgTripSpeed : null,
+      roadTripAvgPower: tripMode === 'roadtrip' ? roadTripResult.avgPowerDraw : null
     };
     setComparisonScenarios([...comparisonScenarios, scenario]);
   };
@@ -872,6 +913,64 @@ export default function EVChargingCalculator() {
     return { timeMins, kwhAdded, rangeAdded, rangeAddedKm, avgSpeed, avgSpeedMph, avgSpeedKph };
   }, [startSoc, stopSoc, batterySize, maxRange, chargerPower, curveData, dwellTime]);
 
+  // --- Road Trip Calculations ---
+  const roadTripResult = useMemo(() => {
+    if (tripMode !== 'roadtrip' || result.rangeAdded === 0) {
+      return { numStops: 0, totalStopTime: 0, totalStopDistance: 0, avgTripSpeed: 0, avgPowerDraw: 0 };
+    }
+
+    const tripDistanceMi = tripDistanceUnit === 'mi' ? tripDistance : tripDistance * 0.621371;
+    const startRangeMi = (startSoc / 100) * maxRange;
+    const chargeRangeMi = result.rangeAdded;
+    
+    // Calculate minimum stops needed
+    let remainingDistance = tripDistanceMi - startRangeMi;
+    let numStops = 0;
+    
+    if (remainingDistance > 0) {
+      numStops = Math.ceil(remainingDistance / chargeRangeMi);
+    }
+    
+    // Total time spent at charging stops (in minutes)
+    const totalStopTime = numStops * result.timeMins;
+    
+    // Determine driving speed based on mode
+    let effectiveDrivingSpeed;
+    if (mode === 'custom') {
+      // Custom mode: use user-defined driving speed
+      effectiveDrivingSpeed = drivingSpeed;
+    } else {
+      // Database mode: extract speed from selected scenario
+      const selectedScenario = rangeScenarios[selectedScenarioIndex];
+      effectiveDrivingSpeed = getScenarioSpeed(selectedScenario?.scenario_name);
+    }
+    
+    // Equivalent distance lost due to stops (mph * hours)
+    const totalStopDistance = effectiveDrivingSpeed * (totalStopTime / 60);
+    
+    // Total trip time including stops (distance / speed + stop time)
+    const drivingTime = tripDistanceMi / effectiveDrivingSpeed * 60; // minutes
+    const totalTripTime = drivingTime + totalStopTime; // minutes
+    
+    // Average trip speed including stops
+    const avgTripSpeed = totalTripTime > 0 ? tripDistanceMi / (totalTripTime / 60) : 0;
+    
+    // Average power draw for entire trip
+    // Energy used = battery start + all charging stops
+    const totalEnergyDelivered = (startSoc / 100 * batterySize) + (numStops * result.kwhAdded);
+    const avgPowerDraw = totalTripTime > 0 ? totalEnergyDelivered / (totalTripTime / 60) : 0;
+    
+    return { 
+      numStops, 
+      totalStopTime, 
+      totalStopDistance, 
+      avgTripSpeed, 
+      avgPowerDraw,
+      drivingTime,
+      totalTripTime
+    };
+  }, [tripMode, tripDistance, tripDistanceUnit, startSoc, maxRange, result, batterySize, mode, drivingSpeed, rangeScenarios, selectedScenarioIndex]);
+
   const formatTime = (totalMins) => {
       const totalSeconds = totalMins * 60;
       const m = Math.floor(totalSeconds / 60);
@@ -895,7 +994,7 @@ export default function EVChargingCalculator() {
                 <Zap className="text-blue-600 dark:text-blue-400" fill="currentColor" />
                 A Better DCFC Charging Calculator
               </h1>
-              <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Based on data from EVKX</p>
+              <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Based on data from EVKX.net</p>
             </div>
             
             <div className="relative">
@@ -1033,10 +1132,73 @@ export default function EVChargingCalculator() {
               )}
 
               <Card className="p-4">
-                <h3 className="font-bold text-sm mb-3 flex items-center gap-2">
-                  <Battery size={16} className="text-slate-400" />
-                  Specs {mode === 'custom' && <Edit3 size={12} className="text-purple-400 ml-1" />}
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-bold text-sm flex items-center gap-2">
+                    <Battery size={16} className="text-slate-400" />
+                    Scenario {mode === 'custom' && <Edit3 size={12} className="text-purple-400 ml-1" />}
+                  </h3>
+                  <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 rounded p-0.5">
+                    <button
+                      onClick={() => setTripMode('single')}
+                      className={`text-[10px] px-2 py-0.5 rounded transition-colors font-medium ${tripMode === 'single' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                    >
+                      Single
+                    </button>
+                    <button
+                      onClick={() => setTripMode('roadtrip')}
+                      className={`text-[10px] px-2 py-0.5 rounded transition-colors font-medium ${tripMode === 'roadtrip' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                    >
+                      Road Trip
+                    </button>
+                  </div>
+                </div>
+                
+                {tripMode === 'roadtrip' && (
+                  <div className="mb-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-2">
+                     <div className="flex items-center gap-1.5 mb-1">
+                        <MapPin size={10} className="text-blue-600 dark:text-blue-400" />
+                        <label className="text-[9px] font-bold text-blue-700 dark:text-blue-300 uppercase">Trip Distance</label>
+                     </div>
+                     <div className="flex gap-1 mb-2">
+                        <input 
+                          type="number"
+                          value={tripDistance}
+                          onChange={(e) => setTripDistance(Math.max(1, Number(e.target.value)))}
+                          className="flex-1 text-xs p-1.5 rounded border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-100 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700"
+                        />
+                        <div className="flex gap-0.5 bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-800 rounded">
+                          <button
+                            onClick={() => setTripDistanceUnit('mi')}
+                            className={`text-[10px] px-2 py-1 transition-colors font-medium ${tripDistanceUnit === 'mi' ? 'bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                          >
+                            mi
+                          </button>
+                          <button
+                            onClick={() => setTripDistanceUnit('km')}
+                            className={`text-[10px] px-2 py-1 transition-colors font-medium ${tripDistanceUnit === 'km' ? 'bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                          >
+                            km
+                          </button>
+                        </div>
+                     </div>
+                     {mode === 'custom' && (
+                       <div>
+                         <label className="text-[9px] font-bold text-blue-700 dark:text-blue-300 uppercase mb-1 block">Driving Speed</label>
+                         <div className="flex gap-1">
+                           <input 
+                             type="number"
+                             value={drivingSpeed}
+                             onChange={(e) => setDrivingSpeed(Math.max(1, Math.min(150, Number(e.target.value))))}
+                             className="flex-1 text-xs p-1.5 rounded border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-100 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700"
+                           />
+                           <div className="flex items-center px-2 bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-800 rounded text-[10px] text-blue-700 dark:text-blue-300 font-medium">
+                             mph
+                           </div>
+                         </div>
+                       </div>
+                     )}
+                  </div>
+                )}
                 
                 {rangeScenarios.length > 0 && mode === 'database' && (
                   <div className="mb-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-2">
@@ -1192,6 +1354,52 @@ export default function EVChargingCalculator() {
                 </Card>
               </div>
 
+              {/* Road Trip Results */}
+              {tripMode === 'roadtrip' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                  <Card className="p-4 border-l-4 border-l-amber-500">
+                    <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-amber-100 text-amber-600 rounded-lg"><MapPin size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Stops & Trip Speed</span></div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center text-xs border-b border-slate-100 dark:border-slate-700 pb-1 mb-1">
+                        <span className="text-slate-500 dark:text-slate-400">Stops</span>
+                        <span className="font-bold text-slate-700 dark:text-slate-200">{roadTripResult.numStops}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 dark:text-slate-400">Avg Speed</span>
+                        <span className="font-mono text-slate-600 dark:text-slate-300">{roadTripResult.avgTripSpeed.toFixed(0)} mph</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 dark:text-slate-400"></span>
+                        <span className="font-mono text-slate-400 dark:text-slate-500">{(roadTripResult.avgTripSpeed * 1.60934).toFixed(0)} kph</span>
+                      </div>
+                    </div>
+                  </Card>
+                  
+                  <Card className="p-4 border-l-4 border-l-red-500">
+                    <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-red-100 text-red-600 rounded-lg"><Clock size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Stop Time & Distance</span></div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center text-xs border-b border-slate-100 dark:border-slate-700 pb-1 mb-1">
+                        <span className="text-slate-500 dark:text-slate-400">Time</span>
+                        <span className="font-bold text-slate-700 dark:text-slate-200">{formatTime(roadTripResult.totalStopTime)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 dark:text-slate-400">Lost Dist</span>
+                        <span className="font-mono text-slate-600 dark:text-slate-300">{roadTripResult.totalStopDistance.toFixed(0)} mi</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 dark:text-slate-400"></span>
+                        <span className="font-mono text-slate-400 dark:text-slate-500">{(roadTripResult.totalStopDistance * 1.60934).toFixed(0)} km</span>
+                      </div>
+                    </div>
+                  </Card>
+                  
+                  <Card className="p-4 border-l-4 border-l-indigo-500">
+                    <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><Zap size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Avg Power</span></div>
+                    <div className="flex items-baseline gap-1"><span className="text-3xl font-bold text-slate-800 dark:text-slate-100">{roadTripResult.avgPowerDraw.toFixed(0)}</span><span className="text-sm text-slate-500 dark:text-slate-400 font-medium">kW</span></div>
+                  </Card>
+                </div>
+              )}
+
               {/* Add to Comparison Button and Credits */}
               <div className="flex justify-between items-center mt-4">
                 <button
@@ -1232,7 +1440,25 @@ export default function EVChargingCalculator() {
             <div className="mt-8">
               <Card className="p-6">
                 <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Comparison Table</h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Comparison Table</h2>
+                    {comparisonScenarios.some(s => s.isRoadTrip) && (
+                      <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 rounded p-0.5">
+                        <button
+                          onClick={() => setComparisonViewMode('single')}
+                          className={`text-[10px] px-2 py-0.5 rounded transition-colors font-medium ${comparisonViewMode === 'single' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                          Single
+                        </button>
+                        <button
+                          onClick={() => setComparisonViewMode('roadtrip')}
+                          className={`text-[10px] px-2 py-0.5 rounded transition-colors font-medium ${comparisonViewMode === 'roadtrip' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                          Road Trip
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <button
                     onClick={() => setComparisonScenarios([])} 
                     className="text-xs text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400"
@@ -1249,9 +1475,20 @@ export default function EVChargingCalculator() {
                         <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Range</th>
                         <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">SoC</th>
                         <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charger</th>
-                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
-                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Range Added</th>
-                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Avg Speed</th>
+                        {comparisonViewMode === 'single' ? (
+                          <>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Range Added</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Avg Speed</th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Trip Dist</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Stops</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Stop Time</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Trip Speed</th>
+                          </>
+                        )}
                         <th className="py-2 px-2"></th>
                       </tr>
                     </thead>
@@ -1268,15 +1505,50 @@ export default function EVChargingCalculator() {
                           <td className="py-3 px-2"><span className="text-slate-700 dark:text-slate-200">{scenario.maxRange}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi</span></td>
                           <td className="py-3 px-2"><span className="text-slate-700 dark:text-slate-200">{scenario.startSoc}</span><span className="text-[10px] text-slate-700 dark:text-slate-200">%</span><span className="text-slate-700 dark:text-slate-200"> → </span><span className="text-slate-700 dark:text-slate-200">{scenario.stopSoc}</span><span className="text-[10px] text-slate-700 dark:text-slate-200">%</span></td>
                           <td className="py-3 px-2"><span className="text-slate-700 dark:text-slate-200">{scenario.chargerPower}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> kW</span></td>
-                          <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">{formatTime(scenario.timeMins)}</td>
-                          <td className="py-3 px-2">
-                            <div><span className="text-slate-700 dark:text-slate-200">{scenario.rangeAdded.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi</span></div>
-                            <div><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.rangeAddedKm.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km</span></div>
-                          </td>
-                          <td className="py-3 px-2">
-                            <div><span className="text-slate-700 dark:text-slate-200">{scenario.avgSpeed.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> kW</span></div>
-                            <div><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedMph.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> mph</span><span className="text-slate-500 dark:text-slate-400 text-xs"> / </span><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedKph.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
-                          </td>
+                          {comparisonViewMode === 'single' ? (
+                            <>
+                              <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">{formatTime(scenario.timeMins)}</td>
+                              <td className="py-3 px-2">
+                                <div><span className="text-slate-700 dark:text-slate-200">{scenario.rangeAdded.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi</span></div>
+                                <div><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.rangeAddedKm.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km</span></div>
+                              </td>
+                              <td className="py-3 px-2">
+                                <div><span className="text-slate-700 dark:text-slate-200">{scenario.avgSpeed.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> kW</span></div>
+                                <div><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedMph.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> mph</span><span className="text-slate-500 dark:text-slate-400 text-xs"> / </span><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedKph.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="py-3 px-2">
+                                {scenario.isRoadTrip ? (
+                                  <><span className="text-slate-700 dark:text-slate-200">{scenario.tripDistance}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> {scenario.tripDistanceUnit}</span></>
+                                ) : (
+                                  <span className="text-slate-400 dark:text-slate-500 text-xs">N/A</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-2">
+                                {scenario.isRoadTrip ? (
+                                  <span className="text-slate-700 dark:text-slate-200">{scenario.roadTripStops}</span>
+                                ) : (
+                                  <span className="text-slate-400 dark:text-slate-500 text-xs">N/A</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-2">
+                                {scenario.isRoadTrip ? (
+                                  <span className="font-mono text-slate-700 dark:text-slate-200">{formatTime(scenario.roadTripStopTime)}</span>
+                                ) : (
+                                  <span className="text-slate-400 dark:text-slate-500 text-xs">N/A</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-2">
+                                {scenario.isRoadTrip ? (
+                                  <><span className="text-slate-700 dark:text-slate-200">{scenario.roadTripAvgSpeed.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph</span></>
+                                ) : (
+                                  <span className="text-slate-400 dark:text-slate-500 text-xs">N/A</span>
+                                )}
+                              </td>
+                            </>
+                          )}
                           <td className="py-3 px-2">
                             <button onClick={() => removeFromComparison(scenario.id)} className="text-slate-400 hover:text-red-600 dark:hover:text-red-400">
                               <X size={16} />
