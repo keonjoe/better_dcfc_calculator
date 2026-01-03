@@ -606,9 +606,13 @@ export default function EVChargingCalculator() {
     if (!db || !selectedMake) return;
     const res = db.exec(`SELECT DISTINCT model FROM vehicles WHERE make = '${selectedMake}' ORDER BY model ASC`);
     if (res.length > 0) {
-      setModels(res[0].values.map(v => v[0]));
-      setSelectedModel('');
-      setVariants([]);
+      const modelsList = res[0].values.map(v => v[0]);
+      setModels(modelsList);
+      // Only clear selected model if it's not in the new list
+      if (selectedModel && !modelsList.includes(selectedModel)) {
+        setSelectedModel('');
+        setVariants([]);
+      }
     }
   }, [db, selectedMake]);
 
@@ -617,8 +621,12 @@ export default function EVChargingCalculator() {
     try {
       const res = db.exec(`SELECT id, variant FROM vehicles WHERE make = '${selectedMake}' AND model = '${selectedModel}'`);
       if (res.length > 0) {
-        setVariants(res[0].values.map(v => ({ id: v[0], name: v[1] })));
-        setSelectedVariant('');
+        const variantsList = res[0].values.map(v => ({ id: v[0], name: v[1] }));
+        setVariants(variantsList);
+        // Only clear selected variant if it's not in the new list
+        if (selectedVariant && !variantsList.find(v => v.id === selectedVariant)) {
+          setSelectedVariant('');
+        }
       }
     } catch (e) { console.warn(e); }
   }, [db, selectedModel]);
@@ -784,20 +792,24 @@ export default function EVChargingCalculator() {
     
     // Select random make
     const randomMake = makes[Math.floor(Math.random() * makes.length)];
-    setSelectedMake(randomMake);
     
     // Get models for this make
     const res = db.exec(`SELECT DISTINCT model FROM vehicles WHERE make = '${randomMake}' ORDER BY model ASC`);
     if (res.length > 0) {
       const modelsList = res[0].values.map(v => v[0]);
       const randomModel = modelsList[Math.floor(Math.random() * modelsList.length)];
-      setSelectedModel(randomModel);
       
       // Get variants for this model
       const varRes = db.exec(`SELECT id, variant FROM vehicles WHERE make = '${randomMake}' AND model = '${randomModel}'`);
       if (varRes.length > 0) {
         const variantsList = varRes[0].values.map(v => ({ id: v[0], name: v[1] }));
         const randomVariant = variantsList[Math.floor(Math.random() * variantsList.length)];
+        
+        // Set all state synchronously to avoid cascading effects
+        setSelectedMake(randomMake);
+        setModels(modelsList);
+        setSelectedModel(randomModel);
+        setVariants(variantsList);
         setSelectedVariant(randomVariant.id);
       }
     }
