@@ -17,6 +17,7 @@ files = {
   },
   "dependencies": {
     "@vercel/analytics": "^1.1.1",
+    "@vercel/speed-insights": "^1.0.0",
     "lucide-react": "^0.263.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -123,12 +124,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
     "src/App.jsx": """import EVChargingCalculator from './EVChargingCalculator'
 import { Analytics } from '@vercel/analytics/react'
+import { SpeedInsights } from '@vercel/speed-insights/react'
 
 function App() {
   return (
     <>
       <EVChargingCalculator />
       <Analytics />
+      <SpeedInsights />
     </>
   )
 }
