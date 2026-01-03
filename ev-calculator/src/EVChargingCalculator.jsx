@@ -697,7 +697,8 @@ export default function EVChargingCalculator() {
       roadTripStopTime: tripMode === 'roadtrip' ? roadTripResult.totalStopTime : null,
       roadTripLostDistance: tripMode === 'roadtrip' ? roadTripResult.totalStopDistance : null,
       roadTripAvgSpeed: tripMode === 'roadtrip' ? roadTripResult.avgTripSpeed : null,
-      roadTripAvgPower: tripMode === 'roadtrip' ? roadTripResult.avgPowerDraw : null
+      roadTripAvgPower: tripMode === 'roadtrip' ? roadTripResult.avgPowerDraw : null,
+      roadTripTotalTime: tripMode === 'roadtrip' ? roadTripResult.totalTripTime : null
     };
     setComparisonScenarios([...comparisonScenarios, scenario]);
   };
@@ -841,6 +842,16 @@ export default function EVChargingCalculator() {
       return (
         <span>
           {m}<span className="text-[10px]">m</span> {s}<span className="text-[10px]">s</span>
+        </span>
+      );
+  };
+
+  const formatTripTime = (totalMins) => {
+      const h = Math.floor(totalMins / 60);
+      const m = Math.floor(totalMins % 60);
+      return (
+        <span>
+          {h}<span className="text-[10px]">h</span> {m}<span className="text-[10px]">m</span>
         </span>
       );
   };
@@ -998,7 +1009,7 @@ export default function EVChargingCalculator() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-bold text-sm flex items-center gap-2">
                     <Battery size={16} className="text-slate-400" />
-                    Scenario {mode === 'custom' && <Edit3 size={12} className="text-purple-400 ml-1" />}
+                    Specs {mode === 'custom' && <Edit3 size={12} className="text-purple-400 ml-1" />}
                   </h3>
                   <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 rounded p-0.5">
                     <button
@@ -1184,6 +1195,9 @@ export default function EVChargingCalculator() {
                 </div>
               </Card>
 
+              <div className="mb-0.5">
+                <h3 className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">Single Charging Session</h3>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card className="p-4 border-l-4 border-l-blue-500">
                   <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><Clock size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Time</span></div>
@@ -1203,15 +1217,15 @@ export default function EVChargingCalculator() {
                   <div className="space-y-1">
                      <div className="flex justify-between items-center text-xs border-b border-slate-100 dark:border-slate-700 pb-1 mb-1">
                         <span className="text-slate-500 dark:text-slate-400">Power</span>
-                        <span className="font-bold text-slate-700 dark:text-slate-200">{result.avgSpeed.toFixed(0)} kW</span>
+                        <span className="font-bold text-slate-700 dark:text-slate-200">{result.avgSpeed.toFixed(1)} kW</span>
                      </div>
                      <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500 dark:text-slate-400">Range</span>
-                        <span className="font-mono text-slate-600 dark:text-slate-300">{result.avgSpeedMph.toFixed(0)} mph</span>
+                        <span className="font-mono text-slate-600 dark:text-slate-300">{result.avgSpeedMph.toFixed(1)} mph</span>
                      </div>
                      <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-500 dark:text-slate-400"></span>
-                        <span className="font-mono text-slate-400 dark:text-slate-500">{result.avgSpeedKph.toFixed(0)} kph</span>
+                        <span className="font-mono text-slate-400 dark:text-slate-500">{result.avgSpeedKph.toFixed(1)} kph</span>
                      </div>
                   </div>
                 </Card>
@@ -1219,48 +1233,48 @@ export default function EVChargingCalculator() {
 
               {/* Road Trip Results */}
               {tripMode === 'roadtrip' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                  <Card className="p-4 border-l-4 border-l-amber-500">
-                    <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-amber-100 text-amber-600 rounded-lg"><MapPin size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Stops & Trip Speed</span></div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center text-xs border-b border-slate-100 dark:border-slate-700 pb-1 mb-1">
-                        <span className="text-slate-500 dark:text-slate-400">Stops</span>
-                        <span className="font-bold text-slate-700 dark:text-slate-200">{roadTripResult.numStops}</span>
+                <>
+                  <div className="mt-6 mb-0.5">
+                    <h3 className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">Road Trip Estimates</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Card className="p-4 border-l-4 border-l-amber-500">
+                      <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-amber-100 text-amber-600 rounded-lg"><Clock size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Total Trip Time</span></div>
+                      <div className="space-y-1">
+                        <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-slate-800 dark:text-slate-100">{formatTripTime(roadTripResult.totalTripTime)}</span></div>
+                        <div className="flex items-baseline gap-1 mt-1"><span className="text-slate-500 dark:text-slate-400 text-xs">Avg: </span><span className="text-slate-600 dark:text-slate-300 text-sm font-semibold">{roadTripResult.avgTripSpeed.toFixed(1)}</span><span className="text-[10px] text-slate-500 dark:text-slate-400"> mph</span></div>
                       </div>
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500 dark:text-slate-400">Avg Speed</span>
-                        <span className="font-mono text-slate-600 dark:text-slate-300">{roadTripResult.avgTripSpeed.toFixed(0)} mph</span>
-                      </div>
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500 dark:text-slate-400"></span>
-                        <span className="font-mono text-slate-400 dark:text-slate-500">{(roadTripResult.avgTripSpeed * 1.60934).toFixed(0)} kph</span>
-                      </div>
-                    </div>
-                  </Card>
+                    </Card>
                   
-                  <Card className="p-4 border-l-4 border-l-red-500">
-                    <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-red-100 text-red-600 rounded-lg"><Clock size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Stop Time & Distance</span></div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center text-xs border-b border-slate-100 dark:border-slate-700 pb-1 mb-1">
-                        <span className="text-slate-500 dark:text-slate-400">Time</span>
-                        <span className="font-bold text-slate-700 dark:text-slate-200">{formatTime(roadTripResult.totalStopTime)}</span>
+                    <Card className="p-4 border-l-4 border-l-red-500">
+                      <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-red-100 text-red-600 rounded-lg"><MapPin size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Stopping Cost</span></div>
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-xs border-b border-slate-100 dark:border-slate-700 pb-1 mb-1">
+                          <span className="text-slate-500 dark:text-slate-400">Stops</span>
+                          <span className="font-bold text-slate-700 dark:text-slate-200">{roadTripResult.numStops}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-500 dark:text-slate-400">Lost Dist</span>
+                          <span className="font-mono text-slate-600 dark:text-slate-300">{roadTripResult.totalStopDistance.toFixed(0)} mi</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-500 dark:text-slate-400"></span>
+                          <span className="font-mono text-slate-400 dark:text-slate-500">{(roadTripResult.totalStopDistance * 1.60934).toFixed(0)} km</span>
+                        </div>
                       </div>
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500 dark:text-slate-400">Lost Dist</span>
-                        <span className="font-mono text-slate-600 dark:text-slate-300">{roadTripResult.totalStopDistance.toFixed(0)} mi</span>
+                    </Card>
+                    
+                    <Card className="p-4 border-l-4 border-l-indigo-500">
+                      <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><Zap size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Avg Trip Power</span></div>
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-500 dark:text-slate-400">Avg Power</span>
+                          <span className="font-mono text-slate-600 dark:text-slate-300">{roadTripResult.avgPowerDraw.toFixed(1)} kW</span>
+                        </div>
                       </div>
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500 dark:text-slate-400"></span>
-                        <span className="font-mono text-slate-400 dark:text-slate-500">{(roadTripResult.totalStopDistance * 1.60934).toFixed(0)} km</span>
-                      </div>
-                    </div>
-                  </Card>
-                  
-                  <Card className="p-4 border-l-4 border-l-indigo-500">
-                    <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><Zap size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Avg Power</span></div>
-                    <div className="flex items-baseline gap-1"><span className="text-3xl font-bold text-slate-800 dark:text-slate-100">{roadTripResult.avgPowerDraw.toFixed(0)}</span><span className="text-sm text-slate-500 dark:text-slate-400 font-medium">kW</span></div>
-                  </Card>
-                </div>
+                    </Card>
+                  </div>
+                </>
               )}
 
               {/* Add to Comparison Button and Credits */}
@@ -1347,9 +1361,9 @@ export default function EVChargingCalculator() {
                         ) : (
                           <>
                             <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Trip Dist</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Total Time</th>
                             <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Stops</th>
-                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Stop Time</th>
-                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Trip Speed</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Avg Speed</th>
                           </>
                         )}
                         <th className="py-2 px-2"></th>
@@ -1376,8 +1390,8 @@ export default function EVChargingCalculator() {
                                 <div><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.rangeAddedKm.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km</span></div>
                               </td>
                               <td className="py-3 px-2">
-                                <div><span className="text-slate-700 dark:text-slate-200">{scenario.avgSpeed.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> kW</span></div>
-                                <div><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedMph.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> mph</span><span className="text-slate-500 dark:text-slate-400 text-xs"> / </span><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedKph.toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
+                                <div><span className="text-slate-700 dark:text-slate-200">{scenario.avgSpeed.toFixed(1)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> kW</span></div>
+                                <div><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedMph.toFixed(1)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> mph</span><span className="text-slate-500 dark:text-slate-400 text-xs"> / </span><span className="text-slate-500 dark:text-slate-400 text-xs">{scenario.avgSpeedKph.toFixed(1)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
                               </td>
                             </>
                           ) : (
@@ -1391,6 +1405,13 @@ export default function EVChargingCalculator() {
                               </td>
                               <td className="py-3 px-2">
                                 {scenario.isRoadTrip ? (
+                                  <span className="font-mono text-slate-700 dark:text-slate-200">{formatTripTime(scenario.roadTripTotalTime)}</span>
+                                ) : (
+                                  <span className="text-slate-400 dark:text-slate-500 text-xs">N/A</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-2">
+                                {scenario.isRoadTrip ? (
                                   <span className="text-slate-700 dark:text-slate-200">{scenario.roadTripStops}</span>
                                 ) : (
                                   <span className="text-slate-400 dark:text-slate-500 text-xs">N/A</span>
@@ -1398,14 +1419,7 @@ export default function EVChargingCalculator() {
                               </td>
                               <td className="py-3 px-2">
                                 {scenario.isRoadTrip ? (
-                                  <span className="font-mono text-slate-700 dark:text-slate-200">{formatTime(scenario.roadTripStopTime)}</span>
-                                ) : (
-                                  <span className="text-slate-400 dark:text-slate-500 text-xs">N/A</span>
-                                )}
-                              </td>
-                              <td className="py-3 px-2">
-                                {scenario.isRoadTrip ? (
-                                  <><span className="text-slate-700 dark:text-slate-200">{scenario.roadTripAvgSpeed.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph</span></>
+                                  <><span className="text-slate-700 dark:text-slate-200">{scenario.roadTripAvgSpeed.toFixed(1)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph</span></>
                                 ) : (
                                   <span className="text-slate-400 dark:text-slate-500 text-xs">N/A</span>
                                 )}
