@@ -1304,6 +1304,8 @@ export default function EVChargingCalculator() {
             model: vehicle.model,
             variant: vehicle.variant,
             battery: vehicle.battery,
+            rangeMi,
+            rangeKm,
             timeMins,
             avgPower,
             rangePerHour,
@@ -1352,6 +1354,8 @@ export default function EVChargingCalculator() {
             model: vehicle.model,
             variant: vehicle.variant,
             battery: vehicle.battery,
+            rangeMi,
+            rangeKm: rangeMi * 1.60934,
             timeMins,
             avgPower,
             rangePerHour,
@@ -1855,13 +1859,18 @@ export default function EVChargingCalculator() {
 
             <div className="lg:col-span-8 space-y-6">
               <Card className="p-6 bg-white dark:bg-slate-800">
-                <div className="flex justify-between items-center mb-6">
+                <div className="flex justify-between items-center mb-2">
                   <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Charging Session</h2>
                   <div className="flex gap-4 text-sm">
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-slate-400 opacity-50"></div><span className="text-slate-500 dark:text-slate-400">Vehicle Limit</span></div>
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-blue-500"></div><span className="text-slate-800 dark:text-slate-200 font-medium">Actual Speed</span></div>
                   </div>
                 </div>
+                {mode === 'custom' && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                    ⓘ Charging curve can be customized by dragging points on the graph
+                  </p>
+                )}
 
                 <ChargingCurveChart 
                   curveData={curveData} 
@@ -2470,8 +2479,9 @@ export default function EVChargingCalculator() {
                                   </div>
                                 )}
                               </td>
-                              <td className="py-3 px-2 text-slate-700 dark:text-slate-200">
-                                {vehicle.battery.toFixed(1)} kWh
+                              <td className="py-3 px-2">
+                                <div className="text-slate-700 dark:text-slate-200">{vehicle.battery.toFixed(1)} kWh</div>
+                                <div className="text-[10px] text-slate-400 dark:text-slate-500">{vehicle.rangeMi.toFixed(0)} mi • {vehicle.rangeKm.toFixed(0)} km</div>
                               </td>
                               {leaderboardMetric === 'fastest-charging' && (
                                 <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">
