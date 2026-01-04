@@ -170,21 +170,35 @@ const InputGroup = ({ label, value, onChange, min, max, step = 1, unit, subtext,
   </div>
 );
 
-const NumberInput = ({ label, value, onChange, unit, disabled }) => (
-  <div className={`flex flex-col ${disabled ? 'opacity-60 pointer-events-none' : ''}`}>
-    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{label}</label>
-    <div className="relative">
-      <input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        disabled={disabled}
-        className={`w-full px-2 py-1.5 text-sm border rounded-lg text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all font-mono ${disabled ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 focus:border-blue-500'}`}
-      />
-      <span className="absolute right-2 top-1.5 text-slate-400 text-xs font-medium">{unit}</span>
+const NumberInput = ({ label, value, onChange, unit, disabled }) => {
+  const [inputValue, setInputValue] = useState(String(value ?? ''));
+  useEffect(() => {
+    setInputValue(String(value ?? ''));
+  }, [value]);
+
+  const commit = () => {
+    const v = inputValue === '' ? 0 : Number(inputValue);
+    if (!Number.isNaN(v) && v >= 0) onChange(Math.max(0, v));
+  };
+
+  return (
+    <div className={`flex flex-col ${disabled ? 'opacity-60 pointer-events-none' : ''}`}>
+      {label && <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{label}</label>}
+      <div className="relative">
+        <input
+          type="number"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') { commit(); e.currentTarget.blur(); } }}
+          disabled={disabled}
+          className={`w-full px-2 py-1.5 text-sm border rounded-lg text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all font-mono ${disabled ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 focus:border-blue-500'}`}
+        />
+        {unit && <span className="absolute right-2 top-1.5 text-slate-400 text-xs font-medium">{unit}</span>}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, darkMode, isCustomMode, onCurveEdit, editedPoints, setEditedPoints, onClearEdits }) => {
   const width = 600;
@@ -572,6 +586,32 @@ export default function EVChargingCalculator() {
   const [tripDistance, setTripDistance] = useState(500);
   const [tripDistanceUnit, setTripDistanceUnit] = useState('mi'); // 'mi' or 'km'
   const [drivingSpeed, setDrivingSpeed] = useState(70); // mph - only used in custom mode
+  const [drivingSpeedUnit, setDrivingSpeedUnit] = useState('mph'); // 'mph' or 'kph'
+  const [maxRangeUnit, setMaxRangeUnit] = useState('mi'); // 'mi' or 'km'
+  const [dbRangeKm, setDbRangeKm] = useState(null); // Track database range for unit conversion
+  const [tripDistanceInput, setTripDistanceInput] = useState(String(500));
+  const [drivingSpeedInput, setDrivingSpeedInput] = useState(String(70));
+  useEffect(() => { setTripDistanceInput(String(tripDistance)); }, [tripDistance]);
+  useEffect(() => { setDrivingSpeedInput(String(drivingSpeed)); }, [drivingSpeed]);
+  const commitTripDistance = () => {
+    const v = tripDistanceInput === '' ? NaN : Number(tripDistanceInput);
+    if (!Number.isNaN(v) && v >= 0) setTripDistance(Math.max(1, v));
+  };
+  const commitDrivingSpeed = () => {
+    const v = drivingSpeedInput === '' ? NaN : Number(drivingSpeedInput);
+    if (!Number.isNaN(v) && v >= 0) setDrivingSpeed(Math.max(1, Math.min(300, v)));
+  };
+
+  // Handle max range unit changes in database mode
+  useEffect(() => {
+    if (mode === 'database' && dbRangeKm !== null) {
+      if (maxRangeUnit === 'mi') {
+        setMaxRange(Math.round(dbRangeKm * 0.621371));
+      } else {
+        setMaxRange(Math.round(dbRangeKm));
+      }
+    }
+  }, [maxRangeUnit, mode, dbRangeKm]);
 
   // Comparison
   const [comparisonScenarios, setComparisonScenarios] = useState([]);
@@ -732,11 +772,19 @@ export default function EVChargingCalculator() {
             
             // Apply Database Values Only if in Database Mode
             if (mode === 'database') {
-                if (scenarios[defIdx].range_km) setMaxRange(Math.round(scenarios[defIdx].range_km * 0.621371));
+                if (scenarios[defIdx].range_km) {
+                    setDbRangeKm(scenarios[defIdx].range_km);
+                    setMaxRange(maxRangeUnit === 'mi' ? Math.round(scenarios[defIdx].range_km * 0.621371) : Math.round(scenarios[defIdx].range_km));
+                }
                 if (loadedBattery > 0) setBatterySize(loadedBattery);
                 setCurveData(loadedCurve);
             } else {
-                // In custom mode, just update the background/reference curve
+                // In custom mode, update battery and range but allow curve editing
+                if (scenarios[defIdx].range_km) {
+                    setDbRangeKm(scenarios[defIdx].range_km);
+                    setMaxRange(maxRangeUnit === 'mi' ? Math.round(scenarios[defIdx].range_km * 0.621371) : Math.round(scenarios[defIdx].range_km));
+                }
+                if (loadedBattery > 0) setBatterySize(loadedBattery);
                 if (loadedCurve.length > 0) {
                     setCurveData(loadedCurve.map(p => ({...p, kw: p.kw * curveMultiplier})));
                 }
@@ -907,7 +955,8 @@ export default function EVChargingCalculator() {
 
     const timeMins = totalHours * 60;
     const kwhAdded = (safeStop - safeStart) / 100 * batterySize;
-    const rangeAdded = (safeStop - safeStart) / 100 * maxRange;
+    const maxRangeMi = maxRangeUnit === 'mi' ? maxRange : maxRange * 0.621371;
+    const rangeAdded = (safeStop - safeStart) / 100 * maxRangeMi;
     const rangeAddedKm = rangeAdded * 1.60934;
     const avgSpeed = kwhAdded / totalHours;
     
@@ -915,7 +964,7 @@ export default function EVChargingCalculator() {
     const avgSpeedKph = totalHours > 0 ? rangeAddedKm / totalHours : 0;
 
     return { timeMins, kwhAdded, rangeAdded, rangeAddedKm, avgSpeed, avgSpeedMph, avgSpeedKph };
-  }, [startSoc, stopSoc, batterySize, maxRange, chargerPower, curveData, dwellTime]);
+  }, [startSoc, stopSoc, batterySize, maxRange, maxRangeUnit, chargerPower, curveData, dwellTime]);
 
   // --- Road Trip Calculations ---
   const roadTripResult = useMemo(() => {
@@ -941,8 +990,8 @@ export default function EVChargingCalculator() {
     // Determine driving speed based on mode
     let effectiveDrivingSpeed;
     if (mode === 'custom') {
-      // Custom mode: use user-defined driving speed
-      effectiveDrivingSpeed = drivingSpeed;
+      // Custom mode: use user-defined driving speed, convert to mph if needed
+      effectiveDrivingSpeed = drivingSpeedUnit === 'mph' ? drivingSpeed : drivingSpeed * 0.621371;
     } else {
       // Database mode: extract speed from selected scenario
       const selectedScenario = rangeScenarios[selectedScenarioIndex];
@@ -973,7 +1022,7 @@ export default function EVChargingCalculator() {
       drivingTime,
       totalTripTime
     };
-  }, [tripMode, tripDistance, tripDistanceUnit, startSoc, maxRange, result, batterySize, mode, drivingSpeed, rangeScenarios, selectedScenarioIndex]);
+  }, [tripMode, tripDistance, tripDistanceUnit, startSoc, maxRange, maxRangeUnit, result, batterySize, mode, drivingSpeed, drivingSpeedUnit, rangeScenarios, selectedScenarioIndex]);
 
   const formatTime = (totalMins) => {
       const totalSeconds = totalMins * 60;
@@ -1176,8 +1225,10 @@ export default function EVChargingCalculator() {
                      <div className="flex gap-1 mb-2">
                         <input 
                           type="number"
-                          value={tripDistance}
-                          onChange={(e) => setTripDistance(Math.max(1, Number(e.target.value)))}
+                          value={tripDistanceInput}
+                          onChange={(e) => setTripDistanceInput(e.target.value)}
+                          onBlur={commitTripDistance}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { commitTripDistance(); e.currentTarget.blur(); } }}
                           className="flex-1 text-xs p-1.5 rounded border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-100 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700"
                         />
                         <div className="flex gap-0.5 bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-800 rounded">
@@ -1201,12 +1252,25 @@ export default function EVChargingCalculator() {
                          <div className="flex gap-1">
                            <input 
                              type="number"
-                             value={drivingSpeed}
-                             onChange={(e) => setDrivingSpeed(Math.max(1, Math.min(150, Number(e.target.value))))}
+                             value={drivingSpeedInput}
+                             onChange={(e) => setDrivingSpeedInput(e.target.value)}
+                             onBlur={commitDrivingSpeed}
+                             onKeyDown={(e) => { if (e.key === 'Enter') { commitDrivingSpeed(); e.currentTarget.blur(); } }}
                              className="flex-1 text-xs p-1.5 rounded border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-100 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-700"
                            />
-                           <div className="flex items-center px-2 bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-800 rounded text-[10px] text-blue-700 dark:text-blue-300 font-medium">
-                             mph
+                           <div className="flex gap-0.5 bg-white dark:bg-slate-700 border border-blue-200 dark:border-blue-800 rounded">
+                             <button
+                               onClick={() => setDrivingSpeedUnit('mph')}
+                               className={`text-[10px] px-2 py-1 transition-colors font-medium ${drivingSpeedUnit === 'mph' ? 'bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                             >
+                               mph
+                             </button>
+                             <button
+                               onClick={() => setDrivingSpeedUnit('kph')}
+                               className={`text-[10px] px-2 py-1 transition-colors font-medium ${drivingSpeedUnit === 'kph' ? 'bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                             >
+                               kph
+                             </button>
                            </div>
                          </div>
                        </div>
@@ -1238,24 +1302,46 @@ export default function EVChargingCalculator() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  <NumberInput 
-                    label="Battery Size" 
-                    value={batterySize} 
-                    onChange={setBatterySize} 
-                    unit="kWh" 
-                    disabled={mode === 'database'} 
-                  />
-                  <div>
-                    <NumberInput 
-                      label="Max Range" 
-                      value={maxRange} 
-                      onChange={setMaxRange} 
-                      unit="mi" 
-                      disabled={mode === 'database'} 
-                    />
-                    <div className="text-[9px] text-slate-400 text-right mt-0.5 font-mono">
-                      ≈ {(maxRange * 1.60934).toFixed(0)} km
+                <div className="flex gap-3 mb-3">
+                  <div className={`flex flex-col ${mode === 'database' ? 'opacity-60 pointer-events-none' : ''}`} style={{width: '45%'}}>
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Battery Size</label>
+                    <div className="flex gap-1">
+                      <NumberInput 
+                        label="" 
+                        value={batterySize} 
+                        onChange={setBatterySize} 
+                        unit="" 
+                        disabled={mode === 'database'} 
+                      />
+                      <span className="flex items-center text-[9px] text-slate-500 dark:text-slate-400 font-medium ml-1">
+                        kWh
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col" style={{width: '55%'}}>
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Max Range</label>
+                    <div className="flex gap-1">
+                      <NumberInput 
+                        label="" 
+                        value={maxRange} 
+                        onChange={setMaxRange} 
+                        unit="" 
+                        disabled={mode === 'database'} 
+                      />
+                      <div className="flex gap-0.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded">
+                        <button
+                          onClick={() => setMaxRangeUnit('mi')}
+                          className={`text-[9px] px-1.5 py-0.5 transition-colors font-medium ${maxRangeUnit === 'mi' ? 'bg-slate-100 dark:bg-slate-600 text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                          mi
+                        </button>
+                        <button
+                          onClick={() => setMaxRangeUnit('km')}
+                          className={`text-[9px] px-1.5 py-0.5 transition-colors font-medium ${maxRangeUnit === 'km' ? 'bg-slate-100 dark:bg-slate-600 text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                          km
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
