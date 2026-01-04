@@ -807,8 +807,12 @@ export default function EVChargingCalculator() {
         const newDb = new SQL.Database(uInt8Array);
         setDb(newDb);
         
-        const res = newDb.exec("SELECT DISTINCT make FROM vehicles ORDER BY make ASC");
-        if (res.length > 0) setMakes(res[0].values.map(v => v[0]));
+        const res = newDb.exec("SELECT DISTINCT make FROM vehicles ORDER BY make COLLATE NOCASE ASC");
+        if (res.length > 0) {
+          // Trim whitespace and sort again in JavaScript to ensure proper ordering
+          const makesList = res[0].values.map(v => v[0].trim()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+          setMakes(makesList);
+        }
         
         // Load all range scenarios for leaderboard dropdown
         const scenariosRes = newDb.exec("SELECT DISTINCT scenario_name FROM range_scenarios ORDER BY scenario_name ASC");
@@ -849,9 +853,9 @@ export default function EVChargingCalculator() {
   useEffect(() => {
     if (!db || !selectedModel) return;
     try {
-      const res = db.exec(`SELECT id, variant FROM vehicles WHERE make = '${selectedMake}' AND model = '${selectedModel}'`);
+      const res = db.exec(`SELECT id, variant, variant_url FROM vehicles WHERE make = '${selectedMake}' AND model = '${selectedModel}'`);
       if (res.length > 0) {
-        const variantsList = res[0].values.map(v => ({ id: v[0], name: v[1] }));
+        const variantsList = res[0].values.map(v => ({ id: v[0], name: v[1], url: v[2] }));
         setVariants(variantsList);
         // Only clear selected variant if it's not in the new list
         if (selectedVariant && !variantsList.find(v => v.id === selectedVariant)) {
@@ -1991,13 +1995,30 @@ export default function EVChargingCalculator() {
 
               {/* Add to Comparison Button and Credits */}
               <div className="flex justify-between items-center mt-4">
-                <button
-                  onClick={addToComparison}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg font-medium transition-colors shadow-sm"
-                >
-                  <Database size={16} />
-                  Add to Comparison
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={addToComparison}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg font-medium transition-colors shadow-sm"
+                  >
+                    <Database size={16} />
+                    Add to Comparison
+                  </button>
+                  
+                  {selectedMake && selectedModel && selectedVariant && (() => {
+                    const variantObj = variants.find(v => String(v.id) === String(selectedVariant));
+                    return variantObj?.url && (
+                      <a
+                        href={variantObj.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2 bg-slate-600 hover:bg-slate-700 dark:bg-slate-500 dark:hover:bg-slate-600 text-white rounded-lg font-medium transition-colors shadow-sm"
+                      >
+                        <BookOpen size={16} />
+                        Vehicle Info
+                      </a>
+                    );
+                  })()}
+                </div>
                 
                 <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                   <span>Made by Qiyuan Zhou</span>
