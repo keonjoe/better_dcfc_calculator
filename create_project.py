@@ -2346,7 +2346,7 @@ export default function EVChargingCalculator() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">
-                                {vehicle.make} {vehicle.model}
+                                {formatLabel(vehicle.make)} {formatLabel(vehicle.model)}
                               </span>
                               <span className="px-1 py-0.5 text-[8px] font-bold uppercase bg-purple-500 text-white rounded">
                                 {vehicle.customTag}
