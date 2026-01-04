@@ -139,7 +139,7 @@ function App() {
 export default App""",
 
     "src/EVChargingCalculator.jsx": """import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Battery, Zap, Clock, MapPin, Settings, Info, Upload, Database, ChevronDown, List, Loader2, Edit3, X, Sun, Moon, Linkedin, Activity } from 'lucide-react';
+import { Battery, Zap, Clock, MapPin, Settings, Info, Upload, Database, ChevronDown, List, Loader2, Edit3, X, Sun, Moon, Linkedin, Activity, BarChart3, BookOpen } from 'lucide-react';
 
 const Card = ({ children, className = "" }) => (
   <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 ${className}`}>
@@ -197,6 +197,100 @@ const NumberInput = ({ label, value, onChange, unit, disabled }) => {
         {unit && <span className="absolute right-2 top-1.5 text-slate-400 text-xs font-medium">{unit}</span>}
       </div>
     </div>
+  );
+};
+
+// Compact charging curve preview for tooltips
+const CompactCurvePreview = ({ curveData, startSoc, stopSoc, chargerMaxPower, darkMode }) => {
+  const width = 250;
+  const height = 150;
+  const padding = { top: 10, right: 10, bottom: 20, left: 35 };
+  const graphWidth = width - padding.left - padding.right;
+  const graphHeight = height - padding.top - padding.bottom;
+
+  const theme = {
+    grid: darkMode ? "#334155" : "#e2e8f0",
+    text: darkMode ? "#94a3b8" : "#64748b",
+    carCurve: darkMode ? "#475569" : "#cbd5e1",
+  };
+
+  const safeCurveData = Array.isArray(curveData) ? curveData : [];
+  if (safeCurveData.length === 0) return null;
+
+  const dataMax = Math.max(...safeCurveData.map(d => d.kw));
+  const maxKw = Math.ceil(Math.max(dataMax, chargerMaxPower) / 100) * 100;
+
+  const xScale = (soc) => padding.left + (soc / 100) * graphWidth;
+  const yScale = (kw) => height - padding.bottom - (kw / maxKw) * graphHeight;
+
+  const getKwAt = (s) => {
+    const p = safeCurveData.find(d => d.soc === s);
+    if (p) return p.kw;
+    let lower = safeCurveData[0];
+    let upper = safeCurveData[safeCurveData.length - 1];
+    for (let i = 0; i < safeCurveData.length; i++) {
+      if (safeCurveData[i].soc <= s) lower = safeCurveData[i];
+      if (safeCurveData[i].soc >= s && upper === safeCurveData[safeCurveData.length - 1]) {
+        upper = safeCurveData[i];
+        break;
+      }
+    }
+    if (lower.soc === upper.soc) return lower.kw;
+    return lower.kw + (upper.kw - lower.kw) * ((s - lower.soc) / (upper.soc - lower.soc));
+  };
+
+  const actualCurvePoints = safeCurveData.map(p => ({
+    soc: p.soc,
+    kw: Math.min(p.kw, chargerMaxPower)
+  }));
+
+  let actualCurvePath = "";
+  if (actualCurvePoints.length > 0) {
+    actualCurvePath = `M ${xScale(actualCurvePoints[0].soc)} ${yScale(actualCurvePoints[0].kw)}`;
+    actualCurvePoints.slice(1).forEach(p => {
+      actualCurvePath += ` L ${xScale(p.soc)} ${yScale(p.kw)}`;
+    });
+  }
+
+  const innerPoints = actualCurvePoints.filter(p => p.soc > startSoc && p.soc < stopSoc);
+  const startKw = Math.min(getKwAt(startSoc), chargerMaxPower);
+  const stopKw = Math.min(getKwAt(stopSoc), chargerMaxPower);
+
+  let activeAreaPath = `M ${xScale(startSoc)} ${height - padding.bottom}`;
+  activeAreaPath += ` L ${xScale(startSoc)} ${yScale(startKw)}`;
+  innerPoints.forEach(p => {
+    activeAreaPath += ` L ${xScale(p.soc)} ${yScale(p.kw)}`;
+  });
+  activeAreaPath += ` L ${xScale(stopSoc)} ${yScale(stopKw)}`;
+  activeAreaPath += ` L ${xScale(stopSoc)} ${height - padding.bottom}`;
+  activeAreaPath += " Z";
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
+      {[0, 50, 100].map(tick => (
+        <g key={`x-${tick}`}>
+          <line x1={xScale(tick)} y1={padding.top} x2={xScale(tick)} y2={height - padding.bottom} stroke={theme.grid} strokeWidth="1" />
+          <text x={xScale(tick)} y={height - 5} textAnchor="middle" fill={theme.text} fontSize="10">{tick}%</text>
+        </g>
+      ))}
+      {[0, maxKw / 2, maxKw].map(tick => (
+        <g key={`y-${tick}`}>
+          <line x1={padding.left} y1={yScale(tick)} x2={width - padding.right} y2={yScale(tick)} stroke={theme.grid} strokeWidth="1" />
+          <text x={padding.left - 5} y={yScale(tick) + 3} textAnchor="end" fill={theme.text} fontSize="10">{tick}</text>
+        </g>
+      ))}
+      <line x1={padding.left} y1={yScale(chargerMaxPower)} x2={width - padding.right} y2={yScale(chargerMaxPower)} stroke="#ef4444" strokeWidth="1.5" strokeDasharray="3 2" opacity="0.6" />
+      <path d={activeAreaPath} fill="url(#gradient-compact)" stroke="none" opacity="0.8" />
+      <path d={actualCurvePath} fill="none" stroke="#3b82f6" strokeWidth="2" />
+      <line x1={xScale(startSoc)} y1={padding.top} x2={xScale(startSoc)} y2={height - padding.bottom} stroke="#10b981" strokeWidth="1.5" />
+      <line x1={xScale(stopSoc)} y1={padding.top} x2={xScale(stopSoc)} y2={height - padding.bottom} stroke="#f59e0b" strokeWidth="1.5" />
+      <defs>
+        <linearGradient id="gradient-compact" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.5" />
+          <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.1" />
+        </linearGradient>
+      </defs>
+    </svg>
   );
 };
 
@@ -545,6 +639,7 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
 
 export default function EVChargingCalculator() {
   const [darkMode, setDarkMode] = useState(true); // Default to dark mode
+  const [currentPage, setCurrentPage] = useState('calculator'); // 'calculator', 'leaderboards', or 'info'
   const [showTooltip, setShowTooltip] = useState(false);
   const [db, setDb] = useState(null);
   const [error, setError] = useState(null);
@@ -587,6 +682,22 @@ export default function EVChargingCalculator() {
   const [tripDistanceUnit, setTripDistanceUnit] = useState('mi'); // 'mi' or 'km'
   const [drivingSpeed, setDrivingSpeed] = useState(70); // mph - only used in custom mode
   const [drivingSpeedUnit, setDrivingSpeedUnit] = useState('mph'); // 'mph' or 'kph'
+  
+  // Leaderboards State
+  const [leaderboardMetric, setLeaderboardMetric] = useState('fastest-charging'); // 'fastest-charging', 'highest-avg-power', 'best-range-per-hour'
+  const [leaderboardStartSoc, setLeaderboardStartSoc] = useState(10);
+  const [leaderboardStopSoc, setLeaderboardStopSoc] = useState(80);
+  const [leaderboardChargerPower, setLeaderboardChargerPower] = useState(400);
+  const [leaderboardVehicleCount, setLeaderboardVehicleCount] = useState(10);
+  const [leaderboardResults, setLeaderboardResults] = useState([]);
+  const [isCalculatingLeaderboard, setIsCalculatingLeaderboard] = useState(false);
+  const [leaderboardRangeScenarios, setLeaderboardRangeScenarios] = useState([]);
+  const [leaderboardSelectedScenario, setLeaderboardSelectedScenario] = useState('');
+  const [hoveredCurve, setHoveredCurve] = useState(null);
+  const [infoFeatureView, setInfoFeatureView] = useState('calculator'); // 'calculator' or 'leaderboard'
+  const [customLeaderboardVehicles, setCustomLeaderboardVehicles] = useState([]); // Custom vehicles for leaderboard
+  const [customTagLabel, setCustomTagLabel] = useState('Custom'); // Label for custom tag
+  const [leaderboardFeedback, setLeaderboardFeedback] = useState(''); // Feedback message for add to leaderboard
   const [maxRangeUnit, setMaxRangeUnit] = useState('mi'); // 'mi' or 'km'
   const [dbRangeKm, setDbRangeKm] = useState(null); // Track database range for unit conversion
   const [tripDistanceInput, setTripDistanceInput] = useState(String(500));
@@ -632,6 +743,32 @@ export default function EVChargingCalculator() {
       .join(' ');
   };
 
+  // Add custom vehicle to leaderboard
+  const addCustomToLeaderboard = () => {
+    if (mode !== 'custom') {
+      setLeaderboardFeedback('This feature is only available in Custom mode.');
+      setTimeout(() => setLeaderboardFeedback(''), 3000);
+      return;
+    }
+    
+    // Create custom vehicle object
+    const customVehicle = {
+      id: `custom-${Date.now()}`,
+      make: selectedMake || customTagLabel,
+      model: selectedModel || 'Vehicle',
+      variant: selectedVariant ? variants.find(v => String(v.id) === String(selectedVariant))?.name || customTagLabel : customTagLabel,
+      battery: batterySize,
+      curve: curveData,
+      range: maxRangeUnit === 'mi' ? maxRange : maxRange * 0.621371, // Store in miles
+      isCustom: true,
+      customTag: customTagLabel
+    };
+    
+    setCustomLeaderboardVehicles(prev => [...prev, customVehicle]);
+    setLeaderboardFeedback('✓ Added to leaderboard!');
+    setTimeout(() => setLeaderboardFeedback(''), 3000);
+  };
+
   // Extract driving speed from scenario name
   const getScenarioSpeed = (scenarioName) => {
     if (!scenarioName) return 70; // Default fallback
@@ -672,6 +809,17 @@ export default function EVChargingCalculator() {
         
         const res = newDb.exec("SELECT DISTINCT make FROM vehicles ORDER BY make ASC");
         if (res.length > 0) setMakes(res[0].values.map(v => v[0]));
+        
+        // Load all range scenarios for leaderboard dropdown
+        const scenariosRes = newDb.exec("SELECT DISTINCT scenario_name FROM range_scenarios ORDER BY scenario_name ASC");
+        if (scenariosRes.length > 0 && scenariosRes[0].values.length > 0) {
+          const scenariosList = scenariosRes[0].values.map(v => v[0]);
+          setLeaderboardRangeScenarios(scenariosList);
+          // Set default to 120kph scenario
+          const defaultScenario = scenariosList.find(s => s.toLowerCase().includes('120kmh/75mph range in perfect condition'));
+          setLeaderboardSelectedScenario(defaultScenario || scenariosList[0] || '');
+        }
+        
         setError(null);
       } catch (err) {
         console.error(err);
@@ -856,9 +1004,9 @@ export default function EVChargingCalculator() {
     
     const variantObj = variants.find(v => String(v.id) === String(selectedVariant));
     let variantName = variantObj?.name || '';
-    // Add 'Custom' prefix if in custom mode
+    // Add custom tag prefix if in custom mode
     if (mode === 'custom') {
-      variantName = variantName ? `Custom - ${variantName}` : 'Custom';
+      variantName = variantName ? `${customTagLabel} - ${variantName}` : customTagLabel;
     }
     const scenario = {
       id: Date.now(),
@@ -1024,6 +1172,277 @@ export default function EVChargingCalculator() {
     };
   }, [tripMode, tripDistance, tripDistanceUnit, startSoc, maxRange, maxRangeUnit, result, batterySize, mode, drivingSpeed, drivingSpeedUnit, rangeScenarios, selectedScenarioIndex]);
 
+  // --- Leaderboard Calculations ---
+  const calculateLeaderboard = () => {
+    if (!db || isCalculatingLeaderboard) return;
+
+    setIsCalculatingLeaderboard(true);
+    
+    // Use setTimeout to allow UI to update with loading state
+    setTimeout(() => {
+      try {
+        // Get all vehicles with their basic info - with filtering to improve performance
+        // Only get vehicles with battery > 40 kWh and that have charging curves
+        const vehiclesRes = db.exec(`
+          SELECT DISTINCT v.id, v.make, v.model, v.variant, v.battery_net_kwh
+          FROM vehicles v
+          WHERE v.battery_net_kwh > 40
+          AND v.id IN (SELECT DISTINCT vehicle_id FROM charging_curve)
+          ORDER BY v.make, v.model
+        `);
+        
+        if (!vehiclesRes.length || !vehiclesRes[0].values.length) {
+          setLeaderboardResults([]);
+          setIsCalculatingLeaderboard(false);
+          return;
+        }
+
+        const vehicles = vehiclesRes[0].values.map(row => ({
+          id: row[0],
+          make: row[1],
+          model: row[2],
+          variant: row[3],
+          battery: row[4]
+        }));
+
+        console.log('Total vehicles found:', vehicles.length);
+
+        // Batch query for ranges to reduce queries
+        const vehicleIds = vehicles.map(v => `'${v.id}'`).join(',');
+        const scenarioFilter = leaderboardSelectedScenario ? `AND scenario_name = '${leaderboardSelectedScenario}'` : '';
+        const rangesRes = db.exec(`
+          SELECT vehicle_id, range_km 
+          FROM range_scenarios 
+          WHERE vehicle_id IN (${vehicleIds})
+          ${scenarioFilter}
+        `);
+        
+        const rangeMap = {};
+        if (rangesRes.length && rangesRes[0].values.length) {
+          rangesRes[0].values.forEach(row => {
+            // Use the first range found for each vehicle
+            if (!rangeMap[row[0]]) {
+              rangeMap[row[0]] = row[1];
+            }
+          });
+        }
+
+        console.log('Vehicles with range data:', Object.keys(rangeMap).length);
+        
+        // Log missing vehicles for debugging
+        const missingRange = vehicles.filter(v => !rangeMap[v.id]);
+        if (missingRange.length > 0) {
+          console.log('Vehicles missing range data:', missingRange.map(v => `${v.make} ${v.model} ${v.variant}`).slice(0, 10));
+        }
+
+        // Calculate metrics for database vehicles
+        const results = vehicles.map(vehicle => {
+          // Get charging curve
+          const curveRes = db.exec(`
+            SELECT soc_percent, power_kw 
+            FROM charging_curve 
+            WHERE vehicle_id = '${vehicle.id}' 
+            ORDER BY soc_percent ASC
+          `);
+
+          if (!curveRes.length || !curveRes[0].values.length) return null;
+
+          const curve = curveRes[0].values.map(row => ({
+            soc: row[0],
+            kw: row[1]
+          }));
+
+          // Get range from map or fallback
+          let rangeKm = rangeMap[vehicle.id] || 0;
+          if (rangeKm === 0) {
+            // If no range in map, skip this vehicle
+            return null;
+          }
+
+          const rangeMi = rangeKm * 0.621371;
+
+          // Interpolate kW at any SOC
+          const getKwAtSoc = (s) => {
+            const p = curve.find(x => x.soc === s);
+            if (p) return p.kw;
+            const lower = curve.filter(x => x.soc < s).pop();
+            const upper = curve.find(x => x.soc > s);
+            if (!lower) return upper ? upper.kw : 0;
+            if (!upper) return lower.kw;
+            return lower.kw + (upper.kw - lower.kw) * ((s - lower.soc) / (upper.soc - lower.soc));
+          };
+
+          // Calculate charging metrics for leaderboard SOC range
+          const safeStart = Math.min(leaderboardStartSoc, 99);
+          const safeStop = Math.max(safeStart + 1, leaderboardStopSoc);
+          
+          if (vehicle.battery === 0 || vehicle.battery === null) return null;
+          
+          const energyPerStep = vehicle.battery * 0.01;
+          let totalHours = 0;
+
+          for (let i = safeStart; i < safeStop; i++) {
+            const carCapability = getKwAtSoc(i);
+            const actualPower = Math.min(carCapability, leaderboardChargerPower);
+            const powerSafe = Math.max(1, actualPower);
+            totalHours += energyPerStep / powerSafe;
+          }
+
+          const timeMins = totalHours * 60;
+          const kwhAdded = (safeStop - safeStart) / 100 * vehicle.battery;
+          const rangeAdded = (safeStop - safeStart) / 100 * rangeMi;
+          const avgPower = totalHours > 0 ? kwhAdded / totalHours : 0;
+          const rangePerHour = totalHours > 0 ? rangeAdded / totalHours : 0;
+
+          return {
+            id: vehicle.id,
+            make: vehicle.make,
+            model: vehicle.model,
+            variant: vehicle.variant,
+            battery: vehicle.battery,
+            timeMins,
+            avgPower,
+            rangePerHour,
+            rangeAdded,
+            curve: curve // Store curve data for tooltip
+          };
+        }).filter(r => r !== null);
+
+        // Add custom vehicles to results
+        const customResults = customLeaderboardVehicles.map(vehicle => {
+          const curve = vehicle.curve;
+          const rangeMi = vehicle.range; // Already in miles
+          
+          const getKwAtSoc = (s) => {
+            const p = curve.find(x => x.soc === s);
+            if (p) return p.kw;
+            const lower = curve.filter(x => x.soc < s).pop();
+            const upper = curve.find(x => x.soc > s);
+            if (!lower) return upper ? upper.kw : 0;
+            if (!upper) return lower.kw;
+            return lower.kw + (upper.kw - lower.kw) * ((s - lower.soc) / (upper.soc - lower.soc));
+          };
+
+          const safeStart = Math.min(leaderboardStartSoc, 99);
+          const safeStop = Math.max(safeStart + 1, leaderboardStopSoc);
+          
+          const energyPerStep = vehicle.battery * 0.01;
+          let totalHours = 0;
+
+          for (let i = safeStart; i < safeStop; i++) {
+            const carCapability = getKwAtSoc(i);
+            const actualPower = Math.min(carCapability, leaderboardChargerPower);
+            const powerSafe = Math.max(1, actualPower);
+            totalHours += energyPerStep / powerSafe;
+          }
+
+          const timeMins = totalHours * 60;
+          const kwhAdded = (safeStop - safeStart) / 100 * vehicle.battery;
+          const rangeAdded = (safeStop - safeStart) / 100 * rangeMi;
+          const avgPower = totalHours > 0 ? kwhAdded / totalHours : 0;
+          const rangePerHour = totalHours > 0 ? rangeAdded / totalHours : 0;
+
+          return {
+            id: vehicle.id,
+            make: vehicle.make,
+            model: vehicle.model,
+            variant: vehicle.variant,
+            battery: vehicle.battery,
+            timeMins,
+            avgPower,
+            rangePerHour,
+            rangeAdded,
+            curve: curve,
+            isCustom: true,
+            customTag: vehicle.customTag
+          };
+        });
+
+        const allResults = [...results, ...customResults];
+
+        // Sort based on selected metric
+        let sorted = [...allResults];
+        if (leaderboardMetric === 'fastest-charging') {
+          sorted.sort((a, b) => a.timeMins - b.timeMins);
+        } else if (leaderboardMetric === 'highest-avg-power') {
+          sorted.sort((a, b) => b.avgPower - a.avgPower);
+        } else if (leaderboardMetric === 'best-range-per-hour') {
+          sorted.sort((a, b) => b.rangePerHour - a.rangePerHour);
+        }
+
+        // Combine vehicles with identical battery and time, even across different makes/models
+        const combined = [];
+        const perfGroups = [];
+        
+        sorted.forEach(vehicle => {
+          // Round battery and time for comparison
+          const roundedTime = Math.round(vehicle.timeMins * 20) / 20; // 0.05 min precision
+          const roundedBattery = Math.round(vehicle.battery * 2) / 2; // 0.5 kWh precision
+          
+          // Find existing group with same battery and time
+          const existingGroup = perfGroups.find(g => {
+            const gRoundedTime = Math.round(g.timeMins * 20) / 20;
+            const gRoundedBattery = Math.round(g.battery * 2) / 2;
+            
+            // Combine if battery and time match
+            return gRoundedBattery === roundedBattery && 
+                   gRoundedTime === roundedTime;
+          });
+          
+          if (existingGroup) {
+            // Check if this make/model/variant combination already exists
+            const existingVehicle = existingGroup.vehicles.find(v => 
+              v.make === vehicle.make && v.model === vehicle.model
+            );
+            
+            if (existingVehicle) {
+              // Add variant to existing make/model if not already present
+              const formattedVariants = existingVehicle.variants.map(v => formatLabel(v));
+              const formattedVariant = formatLabel(vehicle.variant);
+              if (!formattedVariants.includes(formattedVariant)) {
+                existingVehicle.variants.push(vehicle.variant);
+              }
+            } else {
+              // Add new make/model to this performance group
+              existingGroup.vehicles.push({
+                make: vehicle.make,
+                model: vehicle.model,
+                variants: [vehicle.variant]
+              });
+            }
+          } else {
+            // Create new performance group
+            perfGroups.push({
+              ...vehicle,
+              vehicles: [{
+                make: vehicle.make,
+                model: vehicle.model,
+                variants: [vehicle.variant]
+              }]
+            });
+          }
+        });
+        
+        // Re-sort the combined results
+        if (leaderboardMetric === 'fastest-charging') {
+          perfGroups.sort((a, b) => a.timeMins - b.timeMins);
+        } else if (leaderboardMetric === 'highest-avg-power') {
+          perfGroups.sort((a, b) => b.avgPower - a.avgPower);
+        } else if (leaderboardMetric === 'best-range-per-hour') {
+          perfGroups.sort((a, b) => b.rangePerHour - a.rangePerHour);
+        }
+
+        console.log('Results calculated:', sorted.length, 'Combined to:', perfGroups.length);
+        setLeaderboardResults(perfGroups.slice(0, leaderboardVehicleCount));
+      } catch (err) {
+        console.error('Leaderboard calculation error:', err);
+        setLeaderboardResults([]);
+      } finally {
+        setIsCalculatingLeaderboard(false);
+      }
+    }, 50);
+  };
+
   const formatTime = (totalMins) => {
       const totalSeconds = totalMins * 60;
       const m = Math.floor(totalSeconds / 60);
@@ -1051,32 +1470,72 @@ export default function EVChargingCalculator() {
         
         <div className="max-w-4xl mx-auto">
           {/* Header */}
-          <div className="mb-6 flex justify-between items-end">
-            <div>
-              <h1 className="text-2xl font-bold flex items-center justify-start gap-2">
-                <Zap className="text-blue-600 dark:text-blue-400" fill="currentColor" />
-                A Better DCFC Charging Calculator
-              </h1>
-              <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Based on data from EVKX.net</p>
+          <div className="mb-6">
+            <div className="flex justify-between items-end mb-3">
+              <div>
+                <h1 className="text-2xl font-bold flex items-center justify-start gap-2">
+                  <Zap className="text-blue-600 dark:text-blue-400" fill="currentColor" />
+                  A Better DCFC Charging Calculator
+                </h1>
+              </div>
+              
+              <div className="relative">
+                <button 
+                  onClick={() => setDarkMode(!darkMode)}
+                  onMouseEnter={() => setShowTooltip(true)}
+                  onMouseLeave={() => setShowTooltip(false)}
+                  className="p-2 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                >
+                  {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+                </button>
+                {showTooltip && (
+                  <div className="absolute top-full right-0 mt-2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded whitespace-nowrap pointer-events-none z-50">
+                    {darkMode ? "Prepare to be blinded!" : "Join the dark side!"}
+                  </div>
+                )}
+              </div>
             </div>
             
-            <div className="relative">
-              <button 
-                onClick={() => setDarkMode(!darkMode)}
-                onMouseEnter={() => setShowTooltip(true)}
-                onMouseLeave={() => setShowTooltip(false)}
-                className="p-2 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage('calculator')}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                  currentPage === 'calculator' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                }`}
               >
-                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+                <Zap size={16} />
+                Calculator
               </button>
-              {showTooltip && (
-                <div className="absolute top-full right-0 mt-2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded whitespace-nowrap pointer-events-none z-50">
-                  {darkMode ? "Prepare to be blinded!" : "Join the dark side!"}
-                </div>
-              )}
+              <button
+                onClick={() => setCurrentPage('leaderboards')}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                  currentPage === 'leaderboards' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                }`}
+              >
+                <BarChart3 size={16} />
+                Leaderboards
+              </button>
+              <button
+                onClick={() => setCurrentPage('info')}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                  currentPage === 'info' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                }`}
+              >
+                <BookOpen size={16} />
+                Info
+              </button>
             </div>
           </div>
 
+          {/* Calculator Page */}
+          {currentPage === 'calculator' && (
+          <>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-4 space-y-3">
               {/* Database Status */}
@@ -1359,6 +1818,33 @@ export default function EVChargingCalculator() {
                     min={0} max={30} step={1} unit="min" 
                     subtext="Non-charging delay (park, pay, etc)"
                   />
+                  
+                  {mode === 'custom' && (
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
+                        Custom Tag
+                      </label>
+                      <input
+                        type="text"
+                        value={customTagLabel}
+                        onChange={(e) => setCustomTagLabel(e.target.value)}
+                        placeholder="Custom"
+                        className="w-full text-xs p-2 mb-2 rounded border border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-700 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <button
+                        onClick={addCustomToLeaderboard}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md font-medium transition-colors shadow-sm text-sm"
+                      >
+                        <BarChart3 size={14} />
+                        Add to Leaderboard
+                      </button>
+                      {leaderboardFeedback && (
+                        <p className="text-xs text-center mt-2 text-green-600 dark:text-green-400 font-medium">
+                          {leaderboardFeedback}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </Card>
             </div>
@@ -1665,9 +2151,432 @@ export default function EVChargingCalculator() {
               </Card>
             </div>
           )}
-        </div>
+          </>
+          )}
+
+          {/* Leaderboards Page */}
+          {currentPage === 'leaderboards' && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              <div className="lg:col-span-4 space-y-3">
+                <Card className="p-4">
+                  {/* Metric Selection Dropdown */}
+                  <div className="mb-3">
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
+                      Select Metric
+                    </label>
+                    <div className="relative">
+                      <select 
+                        value={leaderboardMetric}
+                        onChange={(e) => {
+                          setLeaderboardMetric(e.target.value);
+                          setLeaderboardResults([]);
+                        }}
+                        className="w-full text-xs p-2 pr-6 rounded border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white dark:bg-slate-700 cursor-pointer"
+                      >
+                        <option value="fastest-charging">⚡ Fastest Charging Time</option>
+                        <option value="highest-avg-power">🔋 Highest Average Power</option>
+                        <option value="best-range-per-hour">🏁 Best Range Per Hour</option>
+                      </select>
+                      <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* Range Scenario Selector */}
+                  <div className="mb-3">
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
+                      Range Scenario
+                    </label>
+                    <div className="relative">
+                      <select 
+                        value={leaderboardSelectedScenario}
+                        onChange={(e) => {
+                          setLeaderboardSelectedScenario(e.target.value);
+                          setLeaderboardResults([]);
+                        }}
+                        className="w-full text-xs p-2 pr-6 rounded border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white dark:bg-slate-700 cursor-pointer"
+                      >
+                        {leaderboardRangeScenarios.map((scenario, idx) => (
+                          <option key={idx} value={scenario}>
+                            {formatLabel(scenario)}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* SOC Range Controls */}
+                  <div className="mb-3">
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
+                      SOC Range
+                    </label>
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                      <div className="relative h-12 select-none">
+                        <div className="absolute top-1/2 left-0 right-0 h-2 bg-slate-200 dark:bg-slate-700 rounded-full -translate-y-1/2"></div>
+                        <div 
+                          className="absolute top-1/2 h-2 bg-blue-500 rounded-full -translate-y-1/2"
+                          style={{ left: `${leaderboardStartSoc}%`, right: `${100 - leaderboardStopSoc}%` }}
+                        ></div>
+                        <input 
+                          type="range" 
+                          min="0" max="99" 
+                          value={leaderboardStartSoc} 
+                          onChange={(e) => { const val = Number(e.target.value); setLeaderboardStartSoc(Math.min(val, leaderboardStopSoc - 1)); }} 
+                          className="absolute top-1/2 -translate-y-1/2 left-0 w-full h-2 bg-transparent appearance-none pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-4 [&::-webkit-slider-thumb]:border-emerald-500 [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab z-20"
+                        />
+                        <input 
+                          type="range" 
+                          min="1" max="100" 
+                          value={leaderboardStopSoc} 
+                          onChange={(e) => { const val = Number(e.target.value); setLeaderboardStopSoc(Math.max(val, leaderboardStartSoc + 1)); }} 
+                          className="absolute top-1/2 -translate-y-1/2 left-0 w-full h-2 bg-transparent appearance-none pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-4 [&::-webkit-slider-thumb]:border-amber-500 [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab z-30"
+                        />
+                        <div 
+                          className="absolute top-8 transform -translate-x-1/2 font-mono font-bold text-emerald-600 dark:text-emerald-400 text-base transition-all"
+                          style={{ left: `${leaderboardStartSoc}%` }}
+                        >
+                          {leaderboardStartSoc}%
+                        </div>
+                        <div 
+                          className="absolute top-8 transform -translate-x-1/2 font-mono font-bold text-amber-500 dark:text-amber-400 text-base transition-all"
+                          style={{ left: `${leaderboardStopSoc}%` }}
+                        >
+                          {leaderboardStopSoc}%
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Charger Power Input */}
+                  <div className="mb-3">
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
+                      Charger Maximum Power
+                    </label>
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                      <div className="relative">
+                        <input 
+                          type="range" 
+                          min="50" max="800" step="10"
+                          value={leaderboardChargerPower} 
+                          onChange={(e) => setLeaderboardChargerPower(Number(e.target.value))}
+                          className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer"
+                        />
+                        <div className="flex justify-between items-center mt-2">
+                          <span className="text-xs text-slate-500 dark:text-slate-400">50 kW</span>
+                          <span className="text-base font-bold text-slate-700 dark:text-slate-200">{leaderboardChargerPower} kW</span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">800 kW</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Vehicle Count Slider */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
+                      Number of Vehicles
+                    </label>
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                      <div className="relative">
+                        <input 
+                          type="range" 
+                          min="5" max="25" step="1"
+                          value={leaderboardVehicleCount} 
+                          onChange={(e) => setLeaderboardVehicleCount(Number(e.target.value))}
+                          className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer"
+                        />
+                        <div className="flex justify-between items-center mt-2">
+                          <span className="text-xs text-slate-500 dark:text-slate-400">5</span>
+                          <span className="text-base font-bold text-slate-700 dark:text-slate-200">{leaderboardVehicleCount}</span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">25</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Calculate Button */}
+                  <button
+                    onClick={calculateLeaderboard}
+                    disabled={!db || isCalculatingLeaderboard}
+                    className="w-full mt-4 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors shadow-sm flex items-center justify-center gap-2"
+                  >
+                    {isCalculatingLeaderboard ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Calculating...
+                      </>
+                    ) : (
+                      <>
+                        <BarChart3 size={16} />
+                        Calculate Leaderboard
+                      </>
+                    )}
+                  </button>
+                </Card>
+
+                {/* Custom Vehicles Management - Separate Card */}
+                {customLeaderboardVehicles.length > 0 && (
+                  <Card className="p-4">
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2 block">
+                      Custom Vehicles ({customLeaderboardVehicles.length})
+                    </label>
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {customLeaderboardVehicles.map((vehicle) => (
+                        <div key={vehicle.id} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">
+                                {vehicle.make} {vehicle.model}
+                              </span>
+                              <span className="px-1 py-0.5 text-[8px] font-bold uppercase bg-purple-500 text-white rounded">
+                                {vehicle.customTag}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              {vehicle.battery.toFixed(1)} kWh • {vehicle.range.toFixed(0)} mi
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setCustomLeaderboardVehicles(prev => prev.filter(v => v.id !== vehicle.id))}
+                            className="ml-2 p-1 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                            title="Remove from leaderboard"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+              </div>
+
+              <div className="lg:col-span-8 space-y-6">
+                {/* Results Table Section */}
+                <Card className="p-6 bg-white dark:bg-slate-800">
+                  <h3 className="text-lg font-semibold mb-4 text-slate-700 dark:text-slate-300">
+                    {leaderboardMetric === 'fastest-charging' && '⚡ Fastest Charging Times'}
+                    {leaderboardMetric === 'highest-avg-power' && '🔋 Highest Average Power'}
+                    {leaderboardMetric === 'best-range-per-hour' && '🏁 Best Range Per Hour'}
+                  </h3>
+                  
+                  {isCalculatingLeaderboard ? (
+                    <div className="flex flex-col items-center text-center py-8">
+                      <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-3" />
+                      <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">Calculating leaderboard...</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">This may take a few seconds</p>
+                    </div>
+                  ) : leaderboardResults.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">
+                        Click "Calculate Leaderboard" to see results
+                      </p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500">
+                        Results are calculated based on your selected criteria
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="border-b border-slate-200 dark:border-slate-700">
+                          <tr>
+                            <th className="text-center py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 w-16">Rank</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 w-2/5">Vehicle</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 w-32">Battery</th>
+                            {leaderboardMetric === 'fastest-charging' && (
+                              <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
+                            )}
+                            {leaderboardMetric === 'highest-avg-power' && (
+                              <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Avg Power</th>
+                            )}
+                            {leaderboardMetric === 'best-range-per-hour' && (
+                              <>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Range/Hour</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
+                              </>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {leaderboardResults.map((vehicle, index) => (
+                            <tr key={vehicle.id} className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
+                              <td className="py-3 px-2 font-bold text-slate-600 dark:text-slate-400 text-center">
+                                {index + 1}
+                              </td>
+                              <td className="py-3 px-2 relative">
+                                <div
+                                  className="cursor-pointer"
+                                  onMouseEnter={() => setHoveredCurve({ vehicle, index })}
+                                  onMouseLeave={() => setHoveredCurve(null)}
+                                >
+                                  {vehicle.vehicles.map((v, vIdx) => (
+                                    <div key={vIdx} className={vIdx > 0 ? 'mt-2 pt-2 border-t border-slate-200 dark:border-slate-700' : ''}>
+                                      <div className="flex items-center gap-2">
+                                        <div className="font-medium text-slate-800 dark:text-slate-100 hover:text-blue-500 dark:hover:text-blue-400 transition-colors">
+                                          {formatLabel(v.make)} {formatLabel(v.model)}
+                                        </div>
+                                        {vehicle.isCustom && (
+                                          <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase bg-purple-500 text-white rounded">
+                                            {vehicle.customTag || 'Custom'}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {v.variants && v.variants.length === 1 ? (
+                                        <div className="text-xs text-slate-500 dark:text-slate-400">{formatLabel(v.variants[0])}</div>
+                                      ) : (
+                                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                                          {v.variants.map((variant, i) => (
+                                            <span key={i}>
+                                              {i > 0 && ', '}
+                                              {formatLabel(variant)}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                                {hoveredCurve?.index === index && (
+                                  <div className="absolute left-full ml-2 top-0 z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-2xl p-3 w-64">
+                                    <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                                      {leaderboardStartSoc}% → {leaderboardStopSoc}% @ {leaderboardChargerPower}kW
+                                    </div>
+                                    <CompactCurvePreview 
+                                      curveData={vehicle.curve}
+                                      startSoc={leaderboardStartSoc}
+                                      stopSoc={leaderboardStopSoc}
+                                      chargerMaxPower={leaderboardChargerPower}
+                                      darkMode={darkMode}
+                                    />
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-3 px-2 text-slate-700 dark:text-slate-200">
+                                {vehicle.battery.toFixed(1)} kWh
+                              </td>
+                              {leaderboardMetric === 'fastest-charging' && (
+                                <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">
+                                  {formatTime(vehicle.timeMins)}
+                                </td>
+                              )}
+                              {leaderboardMetric === 'highest-avg-power' && (
+                                <td className="py-3 px-2 font-bold text-slate-700 dark:text-slate-200">
+                                  {vehicle.avgPower.toFixed(1)} kW
+                                </td>
+                              )}
+                              {leaderboardMetric === 'best-range-per-hour' && (
+                                <>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.rangePerHour.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi/h</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.rangePerHour * 1.60934).toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km/h</span></div>
+                                  </td>
+                                  <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">
+                                    {formatTime(vehicle.timeMins)}
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </Card>
+              </div>
+            </div>
+          )}
+
+          {/* Info Page */}
+          {currentPage === 'info' && (
+            <div className="space-y-6">
+              <Card className="p-6">
+                <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+                  <BookOpen className="text-blue-600 dark:text-blue-400" />
+                  Info
+                </h2>
+                
+                <div className="space-y-4 text-slate-600 dark:text-slate-400">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">What is this?</h3>
+                    <p>
+                      A Better DCFC Charging Calculator helps you better visualize and understand EV DC charging performance. 
+                      Using vehicle specific charging curves, you can calculate charging times, range added, 
+                      and plan road trips with multiple charging stops. It also includes a leaderboards feature to compare
+                      different EVs in different scenarios based on various charging metrics.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Features</h3>
+                    <div className="flex gap-1 mb-3">
+                      <button
+                        onClick={() => setInfoFeatureView('calculator')}
+                        className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                          infoFeatureView === 'calculator'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-300 dark:hover:bg-slate-600'
+                        }`}
+                      >
+                        Calculator
+                      </button>
+                      <button
+                        onClick={() => setInfoFeatureView('leaderboard')}
+                        className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                          infoFeatureView === 'leaderboard'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-300 dark:hover:bg-slate-600'
+                        }`}
+                      >
+                        Leaderboards
+                      </button>
+                    </div>
+                    {infoFeatureView === 'calculator' ? (
+                      <ul className="list-disc list-inside space-y-1 ml-2">
+                        <li>Charging performance metrics calculated using vehicle make, model, and variant specific charging curves</li>
+                        <li>Custom mode with editable battery capacity, range, and charging curves</li>
+                        <li>Simple road trip planning with estimated charging stops</li>
+                        <li>Comparison table to evaluate different vehicles and scenarios</li>
+                      </ul>
+                    ) : (
+                      <ul className="list-disc list-inside space-y-1 ml-2">
+                        <li>Compare top performing EVs across different charging metrics</li>
+                        <li>Filter by fastest charging time, highest average power, or best range per hour</li>
+                        <li>Select different range scenarios to see performance in various driving conditions</li>
+                        <li>Adjust SOC range and charger power limits for custom comparisons</li>
+                        <li>Hover over vehicle names to preview their charging curves</li>
+                        <li>Vehicles with identical performance are automatically combined in a single row</li>
+                      </ul>
+                    )}
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Data Source</h3>
+                    <p>
+                      All vehicle and charging data is sourced from <a href="https://evkx.net" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">EVKX.net</a>, 
+                      a comprehensive database of electric vehicle specifications and charging performance.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Contact</h3>
+                    <p>
+                      Questions? Feedback? Please feel free to message me directly on  <a href="https://www.linkedin.com/in/keonjoe" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 inline-flex">
+                        <Linkedin size={14} />
+                      </a>
+                    </p>
+                  </div>
+
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                    <p className="text-sm text-slate-500 dark:text-slate-500">
+                      Note: This tool provides estimates based on ideal conditions. Actual charging performance 
+                      may vary based on temperature, battery health, and charger capabilities.
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          )}
       </div>
     </div>
+  </div>
   );
 }"""
 }
