@@ -2516,14 +2516,21 @@ export default function EVChargingCalculator() {
                             <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 w-2/5">Vehicle</th>
                             <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 w-32">Battery</th>
                             {leaderboardMetric === 'fastest-charging' && (
-                              <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
+                              <>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charging Speed</th>
+                              </>
                             )}
                             {leaderboardMetric === 'highest-avg-power' && (
-                              <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Avg Power</th>
+                              <>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Avg Power</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charging Speed</th>
+                              </>
                             )}
                             {leaderboardMetric === 'best-range-per-hour' && (
                               <>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Range/Hour</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Efficiency</th>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
                               </>
                             )}
@@ -2605,20 +2612,36 @@ export default function EVChargingCalculator() {
                                 <div className="text-[10px] text-slate-400 dark:text-slate-500">{vehicle.rangeMi.toFixed(0)} mi • {vehicle.rangeKm.toFixed(0)} km</div>
                               </td>
                               {leaderboardMetric === 'fastest-charging' && (
-                                <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">
-                                  {formatTime(vehicle.timeMins)}
-                                </td>
+                                <>
+                                  <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">
+                                    {formatTime(vehicle.timeMins)}
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.rangePerHour.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.rangePerHour * 1.60934).toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
+                                  </td>
+                                </>
                               )}
                               {leaderboardMetric === 'highest-avg-power' && (
-                                <td className="py-3 px-2 font-bold text-slate-700 dark:text-slate-200">
-                                  {vehicle.avgPower.toFixed(1)} kW
-                                </td>
+                                <>
+                                  <td className="py-3 px-2 font-bold text-slate-700 dark:text-slate-200">
+                                    {vehicle.avgPower.toFixed(1)} kW
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.rangePerHour.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.rangePerHour * 1.60934).toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
+                                  </td>
+                                </>
                               )}
                               {leaderboardMetric === 'best-range-per-hour' && (
                                 <>
                                   <td className="py-3 px-2">
                                     <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.rangePerHour.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi/h</span></div>
                                     <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.rangePerHour * 1.60934).toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km/h</span></div>
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.efficiency.toFixed(2)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi/kWh</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.efficiency * 1.60934).toFixed(2)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km/kWh</span></div>
                                   </td>
                                   <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">
                                     {formatTime(vehicle.timeMins)}
