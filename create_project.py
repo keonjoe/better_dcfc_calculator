@@ -684,7 +684,7 @@ export default function EVChargingCalculator() {
   const [drivingSpeedUnit, setDrivingSpeedUnit] = useState('mph'); // 'mph' or 'kph'
   
   // Leaderboards State
-  const [leaderboardMetric, setLeaderboardMetric] = useState('fastest-charging'); // 'fastest-charging', 'highest-avg-power', 'best-range-per-hour', 'most-efficient'
+  const [leaderboardMetric, setLeaderboardMetric] = useState('fastest-charging'); // 'fastest-charging', 'highest-avg-power', 'best-range-per-hour', 'most-efficient', 'speed-efficiency'
   const [leaderboardStartSoc, setLeaderboardStartSoc] = useState(10);
   const [leaderboardStopSoc, setLeaderboardStopSoc] = useState(80);
   const [leaderboardChargerPower, setLeaderboardChargerPower] = useState(400);
@@ -1469,6 +1469,8 @@ export default function EVChargingCalculator() {
           sorted.sort((a, b) => b.rangePerHour - a.rangePerHour);
         } else if (leaderboardMetric === 'most-efficient') {
           sorted.sort((a, b) => b.efficiency - a.efficiency);
+        } else if (leaderboardMetric === 'speed-efficiency') {
+          sorted.sort((a, b) => (b.rangePerHour * b.efficiency) - (a.rangePerHour * a.efficiency));
         }
 
         // Combine vehicles with identical battery and time, even across different makes/models
@@ -1535,6 +1537,8 @@ export default function EVChargingCalculator() {
           perfGroups.sort((a, b) => b.rangePerHour - a.rangePerHour);
         } else if (leaderboardMetric === 'most-efficient') {
           perfGroups.sort((a, b) => b.efficiency - a.efficiency);
+        } else if (leaderboardMetric === 'speed-efficiency') {
+          perfGroups.sort((a, b) => (b.rangePerHour * b.efficiency) - (a.rangePerHour * a.efficiency));
         }
 
         console.log('Results calculated:', sorted.length, 'Combined to:', perfGroups.length);
@@ -2332,6 +2336,7 @@ export default function EVChargingCalculator() {
                         <option value="highest-avg-power">🔋 Highest Average Power</option>
                         <option value="best-range-per-hour">🏁 Best Range Per Hour</option>
                         <option value="most-efficient">🍃 Most Efficient</option>
+                        <option value="speed-efficiency">🚀 Speed × Efficiency</option>
                       </select>
                       <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                     </div>
@@ -2435,7 +2440,7 @@ export default function EVChargingCalculator() {
                       <div className="relative">
                         <input 
                           type="range" 
-                          min="5" max="50" step="1"
+                          min="5" max="100" step="1"
                           value={leaderboardVehicleCount} 
                           onChange={(e) => { setLeaderboardVehicleCount(Number(e.target.value)); setLeaderboardResults([]); }}
                           className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer"
@@ -2443,7 +2448,7 @@ export default function EVChargingCalculator() {
                         <div className="flex justify-between items-center mt-2">
                           <span className="text-xs text-slate-500 dark:text-slate-400">5</span>
                           <span className="text-base font-bold text-slate-700 dark:text-slate-200">{leaderboardVehicleCount}</span>
-                          <span className="text-xs text-slate-500 dark:text-slate-400">50</span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">100</span>
                         </div>
                       </div>
                     </div>
@@ -2630,6 +2635,7 @@ export default function EVChargingCalculator() {
                     {leaderboardMetric === 'highest-avg-power' && '🔋 Highest Average Power'}
                     {leaderboardMetric === 'best-range-per-hour' && '🏁 Best Range Per Hour'}
                     {leaderboardMetric === 'most-efficient' && '🍃 Most Efficient Vehicles'}
+                    {leaderboardMetric === 'speed-efficiency' && '🚀 Best Speed × Efficiency'}
                   </h3>
                   
                   {isCalculatingLeaderboard ? (
@@ -2678,6 +2684,13 @@ export default function EVChargingCalculator() {
                               <>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Efficiency</th>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charging Speed</th>
+                              </>
+                            )}
+                            {leaderboardMetric === 'speed-efficiency' && (
+                              <>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charging Speed</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Efficiency</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Speed × Efficiency</th>
                               </>
                             )}
                           </tr>
@@ -2797,6 +2810,22 @@ export default function EVChargingCalculator() {
                                   <td className="py-3 px-2">
                                     <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.rangePerHour.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph</span></div>
                                     <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.rangePerHour * 1.60934).toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
+                                  </td>
+                                </>
+                              )}
+                              {leaderboardMetric === 'speed-efficiency' && (
+                                <>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.rangePerHour.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.rangePerHour * 1.60934).toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.efficiency.toFixed(2)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi/kWh</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.efficiency * 1.60934).toFixed(2)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km/kWh</span></div>
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{(vehicle.rangePerHour * vehicle.efficiency).toFixed(1)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph·mi/kWh</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.rangePerHour * 1.60934 * vehicle.efficiency * 1.60934).toFixed(1)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph·km/kWh</span></div>
                                   </td>
                                 </>
                               )}
