@@ -560,9 +560,10 @@ export default function EVChargingCalculator() {
   const [leaderboardFeedback, setLeaderboardFeedback] = useState(''); // Feedback message for add to leaderboard
   const [availableCountries, setAvailableCountries] = useState([]); // List of all countries from database
   const [includedCountries, setIncludedCountries] = useState([]); // Countries to include in leaderboard (all by default)
-  const [selectedChargePortRegions, setSelectedChargePortRegions] = useState(['chargeport_type_na', 'chargeport_type_china', 'chargeport_type_eu', 'chargeport_type_japan', 'chargeport_type_oceania']); // Selected charge port regions
+  const [availableVehicleMakes, setAvailableVehicleMakes] = useState([]); // List of all unique vehicle makes from database
+  const [selectedVehicleMakes, setSelectedVehicleMakes] = useState([]); // Vehicle makes to include in leaderboard
   const [showCountryFilter, setShowCountryFilter] = useState(false); // Collapse state for country filter
-  const [showChargePortFilter, setShowChargePortFilter] = useState(false); // Collapse state for charge port filter
+  const [showMakesFilter, setShowMakesFilter] = useState(false); // Collapse state for vehicle makes filter
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 }); // Mouse position for tooltip
   const [maxRangeUnit, setMaxRangeUnit] = useState('mi'); // 'mi' or 'km'
   const [dbRangeKm, setDbRangeKm] = useState(null); // Track database range for unit conversion
@@ -678,6 +679,8 @@ export default function EVChargingCalculator() {
           // Trim whitespace and sort again in JavaScript to ensure proper ordering
           const makesList = res[0].values.map(v => v[0].trim()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
           setMakes(makesList);
+          setAvailableVehicleMakes(makesList); // Set available makes for leaderboard filter
+          setSelectedVehicleMakes(makesList); // Select all makes by default
         }
         
         // Load all range scenarios for leaderboard dropdown
@@ -740,6 +743,34 @@ export default function EVChargingCalculator() {
     };
     loadDatabase();
   }, []);
+
+  // --- Update available makes when country filter changes ---
+  useEffect(() => {
+    if (!db || includedCountries.length === 0) return;
+    
+    // Build country filter for SQL query
+    let countryFilter = '';
+    if (includedCountries.length < availableCountries.length) {
+      const countriesStr = includedCountries.map(c => `'${c}'`).join(',');
+      countryFilter = `WHERE country IN (${countriesStr})`;
+    }
+    
+    // Query makes that exist in the selected countries
+    const makesRes = db.exec(`
+      SELECT DISTINCT make 
+      FROM vehicles 
+      ${countryFilter}
+      ORDER BY make COLLATE NOCASE ASC
+    `);
+    
+    if (makesRes.length > 0) {
+      const makesList = makesRes[0].values.map(v => v[0].trim()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      setAvailableVehicleMakes(makesList);
+      
+      // Update selectedVehicleMakes to only include makes that are still available
+      setSelectedVehicleMakes(prev => prev.filter(make => makesList.includes(make)));
+    }
+  }, [db, includedCountries, availableCountries]);
 
   // --- Cascading Selects ---
   useEffect(() => {
@@ -1093,7 +1124,7 @@ export default function EVChargingCalculator() {
         console.log('Calculate Leaderboard - Starting');
         console.log('Available countries:', availableCountries.length);
         console.log('Included countries:', includedCountries.length, includedCountries);
-        console.log('Selected charge port regions:', selectedChargePortRegions);
+        console.log('Selected vehicle makes:', selectedVehicleMakes);
         
         // Build country inclusion filter
         let countryFilter = '';
@@ -1113,14 +1144,21 @@ export default function EVChargingCalculator() {
         }
         // If all countries are selected, no filter needed (countryFilter stays empty)
         
-        // Build charge port region filter
-        let chargePortFilter = '';
-        if (selectedChargePortRegions.length > 0 && selectedChargePortRegions.length < 5) {
-          const conditions = selectedChargePortRegions.map(region => `v.${region} IS NOT NULL`);
-          chargePortFilter = `AND (${conditions.join(' OR ')})`;
-          console.log('Charge port filter applied:', chargePortFilter);
+        // Build vehicle makes filter
+        let makesFilter = '';
+        if (selectedVehicleMakes.length === 0) {
+          // No makes selected - return no results
+          console.log('No vehicle makes selected - returning empty results');
+          setLeaderboardResults([]);
+          setIsCalculatingLeaderboard(false);
+          return;
+        } else if (selectedVehicleMakes.length < availableVehicleMakes.length) {
+          // Subset of makes selected - apply filter
+          const makesStr = selectedVehicleMakes.map(m => `'${m}'`).join(',');
+          makesFilter = `AND v.make IN (${makesStr})`;
+          console.log('Vehicle makes filter applied:', makesFilter);
         } else {
-          console.log('All charge port regions selected - no filter');
+          console.log('All vehicle makes selected - no makes filter');
         }
         
         // Get all vehicles with their basic info - with filtering to improve performance
@@ -1131,7 +1169,7 @@ export default function EVChargingCalculator() {
           WHERE v.battery_net_kwh > 40
           AND v.id IN (SELECT DISTINCT vehicle_id FROM charging_curve)
           ${countryFilter}
-          ${chargePortFilter}
+          ${makesFilter}
           ORDER BY v.make, v.model
         `);
         
@@ -2296,7 +2334,7 @@ export default function EVChargingCalculator() {
                     <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
                       Number of Vehicles
                     </label>
-                    <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-3">
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
                       <div className="relative">
                         <input 
                           type="range" 
@@ -2369,41 +2407,46 @@ export default function EVChargingCalculator() {
                     )}
                   </div>
 
-                  {/* Charge Port Region Filter - Collapsible */}
+                  {/* Vehicle Makes Filter - Collapsible */}
                   <div className="mb-3">
                     <button
-                      onClick={() => setShowChargePortFilter(!showChargePortFilter)}
+                      onClick={() => setShowMakesFilter(!showMakesFilter)}
                       className="w-full flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
                     >
-                      <span>Supported charging regions:</span>
-                      <ChevronDown size={14} className={`transition-transform ${showChargePortFilter ? 'rotate-180' : ''}`} />
+                      <span>Included vehicle makes:</span>
+                      <ChevronDown size={14} className={`transition-transform ${showMakesFilter ? 'rotate-180' : ''}`} />
                     </button>
-                    {showChargePortFilter && (
-                      <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2 space-y-1">
-                        {[
-                          { value: 'chargeport_type_na', label: 'North America' },
-                          { value: 'chargeport_type_china', label: 'China' },
-                          { value: 'chargeport_type_eu', label: 'Europe' },
-                          { value: 'chargeport_type_japan', label: 'Japan' },
-                          { value: 'chargeport_type_oceania', label: 'Oceania' }
-                        ].map((region) => (
-                          <label key={region.value} className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 p-1 rounded">
-                            <input
-                              type="checkbox"
-                              checked={selectedChargePortRegions.includes(region.value)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedChargePortRegions([...selectedChargePortRegions, region.value]);
-                                } else {
-                                  setSelectedChargePortRegions(selectedChargePortRegions.filter(r => r !== region.value));
-                                }
-                                setLeaderboardResults([]);
-                              }}
-                              className="w-3 h-3 text-blue-600 rounded focus:ring-blue-500"
-                            />
-                            <span className="text-xs text-slate-700 dark:text-slate-200">{region.label}</span>
-                          </label>
-                        ))}
+                    {showMakesFilter && (
+                      <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2">
+                        <button
+                          onClick={() => {
+                            setSelectedVehicleMakes(availableVehicleMakes);
+                            setLeaderboardResults([]);
+                          }}
+                          className="w-full mb-2 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                        >
+                          Select All
+                        </button>
+                        <div className="max-h-[300px] overflow-y-auto space-y-1">
+                          {availableVehicleMakes.map((make) => (
+                            <label key={make} className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 p-1 rounded">
+                              <input
+                                type="checkbox"
+                                checked={selectedVehicleMakes.includes(make)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedVehicleMakes([...selectedVehicleMakes, make]);
+                                  } else {
+                                    setSelectedVehicleMakes(selectedVehicleMakes.filter(m => m !== make));
+                                  }
+                                  setLeaderboardResults([]);
+                                }}
+                                className="w-3 h-3 text-blue-600 rounded focus:ring-blue-500"
+                              />
+                              <span className="text-xs text-slate-700 dark:text-slate-200">{make}</span>
+                            </label>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
