@@ -719,19 +719,6 @@ export default function EVChargingCalculator() {
             'SA': 'Saudi Arabia', 'TH': 'Thailand', 'VN': 'Vietnam', 'MY': 'Malaysia', 'SG': 'Singapore',
             'ID': 'Indonesia', 'PH': 'Philippines', 'NZ': 'New Zealand', 'AR': 'Argentina', 'CL': 'Chile'
           };
-          // Mapping country codes to flag emojis - works reliably on all systems including Windows
-          const codeToFlagEmoji = {
-            'CN': '🇨🇳', 'DE': '🇩🇪', 'US': '🇺🇸', 'JP': '🇯🇵',
-            'KR': '🇰🇷', 'FR': '🇫🇷', 'GB': '🇬🇧',
-            'SE': '🇸🇪', 'IT': '🇮🇹', 'NL': '🇳🇱', 'ES': '🇪🇸', 'AT': '🇦🇹',
-            'CZ': '🇨🇿', 'PL': '🇵🇱', 'IN': '🇮🇳', 'AU': '🇦🇺', 'CA': '🇨🇦',
-            'MX': '🇲🇽', 'BR': '🇧🇷', 'NO': '🇳🇴', 'DK': '🇩🇰', 'FI': '🇫🇮',
-            'BE': '🇧🇪', 'CH': '🇨🇭', 'PT': '🇵🇹', 'IE': '🇮🇪', 'GR': '🇬🇷',
-            'HU': '🇭🇺', 'RO': '🇷🇴', 'SK': '🇸🇰', 'SI': '🇸🇮', 'HR': '🇭🇷',
-            'RS': '🇷🇸', 'BG': '🇧🇬', 'TR': '🇹🇷', 'IL': '🇮🇱', 'AE': '🇦🇪',
-            'SA': '🇸🇦', 'TH': '🇹🇭', 'VN': '🇻🇳', 'MY': '🇲🇾', 'SG': '🇸🇬',
-            'ID': '🇮🇩', 'PH': '🇵🇭', 'NZ': '🇳🇿', 'AR': '🇦🇷', 'CL': '🇨🇱'
-          };
           const countriesList = countriesRes[0].values.map(v => {
             const countryName = v[0];
             const code = countryCodeMap[countryName] || countryName.substring(0, 2).toUpperCase();
@@ -2340,7 +2327,7 @@ export default function EVChargingCalculator() {
                       <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2 max-h-60 overflow-y-auto">
                         <div className="grid grid-cols-3 gap-1">
                           {availableCountries.map((country, idx) => {
-                            const flagEmoji = codeToFlagEmoji[country.code] || country.code;
+                            const flagEmoji = country.code ? String.fromCodePoint(...[...country.code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) : '';
                             return (
                               <label key={idx} className="flex items-center gap-1 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 p-1 rounded">
                                 <input
@@ -2582,7 +2569,7 @@ export default function EVChargingCalculator() {
                                 >
                                   {vehicle.vehicles.map((v, vIdx) => {
                                     const countryCode = v.country;
-                                    const flagEmoji = codeToFlagEmoji[countryCode] || countryCode;
+                                    const flagEmoji = countryCode ? String.fromCodePoint(...[...countryCode.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) : '';
                                     const evkxUrl = `https://evkx.net/models/${v.make.replace(/\s+/g, '_')}/${v.model.replace(/\s+/g, '_')}`;
                                     return (
                                     <div key={vIdx} className={vIdx > 0 ? 'mt-2 pt-2 border-t border-slate-200 dark:border-slate-700' : ''}>
