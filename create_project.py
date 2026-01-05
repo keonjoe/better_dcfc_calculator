@@ -698,6 +698,12 @@ export default function EVChargingCalculator() {
   const [customLeaderboardVehicles, setCustomLeaderboardVehicles] = useState([]); // Custom vehicles for leaderboard
   const [customTagLabel, setCustomTagLabel] = useState('Custom'); // Label for custom tag
   const [leaderboardFeedback, setLeaderboardFeedback] = useState(''); // Feedback message for add to leaderboard
+  const [availableCountries, setAvailableCountries] = useState([]); // List of all countries from database
+  const [includedCountries, setIncludedCountries] = useState([]); // Countries to include in leaderboard (all by default)
+  const [selectedChargePortRegions, setSelectedChargePortRegions] = useState(['chargeport_type_na', 'chargeport_type_china', 'chargeport_type_eu', 'chargeport_type_japan', 'chargeport_type_oceania']); // Selected charge port regions
+  const [showCountryFilter, setShowCountryFilter] = useState(false); // Collapse state for country filter
+  const [showChargePortFilter, setShowChargePortFilter] = useState(false); // Collapse state for charge port filter
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 }); // Mouse position for tooltip
   const [maxRangeUnit, setMaxRangeUnit] = useState('mi'); // 'mi' or 'km'
   const [dbRangeKm, setDbRangeKm] = useState(null); // Track database range for unit conversion
   const [tripDistanceInput, setTripDistanceInput] = useState(String(500));
@@ -822,6 +828,46 @@ export default function EVChargingCalculator() {
           // Set default to 120kph scenario
           const defaultScenario = scenariosList.find(s => s.toLowerCase().includes('120kmh/75mph range in perfect condition'));
           setLeaderboardSelectedScenario(defaultScenario || scenariosList[0] || '');
+        }
+        
+        // Load available countries for leaderboard filtering
+        const countriesRes = newDb.exec("SELECT DISTINCT country FROM vehicles WHERE country IS NOT NULL ORDER BY country ASC");
+        if (countriesRes.length > 0 && countriesRes[0].values.length > 0) {
+          // Map country names to ISO 2-letter codes
+          const countryCodeMap = {
+            'China': 'CN', 'Germany': 'DE', 'USA': 'US', 'United States': 'US', 'Japan': 'JP',
+            'South Korea': 'KR', 'Korea': 'KR', 'France': 'FR', 'UK': 'GB', 'United Kingdom': 'GB',
+            'Sweden': 'SE', 'Italy': 'IT', 'Netherlands': 'NL', 'Spain': 'ES', 'Austria': 'AT',
+            'Czech Republic': 'CZ', 'Poland': 'PL', 'India': 'IN', 'Australia': 'AU', 'Canada': 'CA',
+            'Mexico': 'MX', 'Brazil': 'BR', 'Norway': 'NO', 'Denmark': 'DK', 'Finland': 'FI',
+            'Belgium': 'BE', 'Switzerland': 'CH', 'Portugal': 'PT', 'Ireland': 'IE', 'Greece': 'GR',
+            'Hungary': 'HU', 'Romania': 'RO', 'Slovakia': 'SK', 'Slovenia': 'SI', 'Croatia': 'HR',
+            'Serbia': 'RS', 'Bulgaria': 'BG', 'Turkey': 'TR', 'Israel': 'IL', 'UAE': 'AE',
+            'Saudi Arabia': 'SA', 'Thailand': 'TH', 'Vietnam': 'VN', 'Malaysia': 'MY', 'Singapore': 'SG',
+            'Indonesia': 'ID', 'Philippines': 'PH', 'New Zealand': 'NZ', 'Argentina': 'AR', 'Chile': 'CL'
+          };
+          // Create reverse mapping: code -> full name
+          const codeToNameMap = {
+            'CN': 'China', 'DE': 'Germany', 'US': 'United States', 'JP': 'Japan',
+            'KR': 'South Korea', 'FR': 'France', 'GB': 'United Kingdom',
+            'SE': 'Sweden', 'IT': 'Italy', 'NL': 'Netherlands', 'ES': 'Spain', 'AT': 'Austria',
+            'CZ': 'Czech Republic', 'PL': 'Poland', 'IN': 'India', 'AU': 'Australia', 'CA': 'Canada',
+            'MX': 'Mexico', 'BR': 'Brazil', 'NO': 'Norway', 'DK': 'Denmark', 'FI': 'Finland',
+            'BE': 'Belgium', 'CH': 'Switzerland', 'PT': 'Portugal', 'IE': 'Ireland', 'GR': 'Greece',
+            'HU': 'Hungary', 'RO': 'Romania', 'SK': 'Slovakia', 'SI': 'Slovenia', 'HR': 'Croatia',
+            'RS': 'Serbia', 'BG': 'Bulgaria', 'TR': 'Turkey', 'IL': 'Israel', 'AE': 'United Arab Emirates',
+            'SA': 'Saudi Arabia', 'TH': 'Thailand', 'VN': 'Vietnam', 'MY': 'Malaysia', 'SG': 'Singapore',
+            'ID': 'Indonesia', 'PH': 'Philippines', 'NZ': 'New Zealand', 'AR': 'Argentina', 'CL': 'Chile'
+          };
+          const countriesList = countriesRes[0].values.map(v => {
+            const countryName = v[0];
+            const code = countryCodeMap[countryName] || countryName.substring(0, 2).toUpperCase();
+            const fullName = codeToNameMap[code] || countryName;
+            return { name: countryName, code, fullName };
+          });
+          setAvailableCountries(countriesList);
+          // Initialize includedCountries with all countries by default
+          setIncludedCountries(countriesList.map(c => c.name));
         }
         
         setError(null);
@@ -1185,13 +1231,48 @@ export default function EVChargingCalculator() {
     // Use setTimeout to allow UI to update with loading state
     setTimeout(() => {
       try {
+        console.log('Calculate Leaderboard - Starting');
+        console.log('Available countries:', availableCountries.length);
+        console.log('Included countries:', includedCountries.length, includedCountries);
+        console.log('Selected charge port regions:', selectedChargePortRegions);
+        
+        // Build country inclusion filter
+        let countryFilter = '';
+        if (includedCountries.length === 0) {
+          // No countries selected - return no results
+          console.log('No countries selected - returning empty results');
+          setLeaderboardResults([]);
+          setIsCalculatingLeaderboard(false);
+          return;
+        } else if (includedCountries.length < availableCountries.length) {
+          // Subset of countries selected - apply filter
+          const countriesStr = includedCountries.map(c => `'${c}'`).join(',');
+          countryFilter = `AND v.country IN (${countriesStr})`;
+          console.log('Country filter applied:', countryFilter);
+        } else {
+          console.log('All countries selected - no country filter');
+        }
+        // If all countries are selected, no filter needed (countryFilter stays empty)
+        
+        // Build charge port region filter
+        let chargePortFilter = '';
+        if (selectedChargePortRegions.length > 0 && selectedChargePortRegions.length < 5) {
+          const conditions = selectedChargePortRegions.map(region => `v.${region} IS NOT NULL`);
+          chargePortFilter = `AND (${conditions.join(' OR ')})`;
+          console.log('Charge port filter applied:', chargePortFilter);
+        } else {
+          console.log('All charge port regions selected - no filter');
+        }
+        
         // Get all vehicles with their basic info - with filtering to improve performance
         // Only get vehicles with battery > 40 kWh and that have charging curves
         const vehiclesRes = db.exec(`
-          SELECT DISTINCT v.id, v.make, v.model, v.variant, v.battery_net_kwh
+          SELECT DISTINCT v.id, v.make, v.model, v.variant, v.battery_net_kwh, v.country
           FROM vehicles v
           WHERE v.battery_net_kwh > 40
           AND v.id IN (SELECT DISTINCT vehicle_id FROM charging_curve)
+          ${countryFilter}
+          ${chargePortFilter}
           ORDER BY v.make, v.model
         `);
         
@@ -1206,7 +1287,8 @@ export default function EVChargingCalculator() {
           make: row[1],
           model: row[2],
           variant: row[3],
-          battery: row[4]
+          battery: row[4],
+          country: row[5]
         }));
 
         console.log('Total vehicles found:', vehicles.length);
@@ -1304,6 +1386,7 @@ export default function EVChargingCalculator() {
             model: vehicle.model,
             variant: vehicle.variant,
             battery: vehicle.battery,
+            country: vehicle.country,
             rangeMi,
             rangeKm,
             timeMins,
@@ -1354,6 +1437,7 @@ export default function EVChargingCalculator() {
             model: vehicle.model,
             variant: vehicle.variant,
             battery: vehicle.battery,
+            country: vehicle.country || null,
             rangeMi,
             rangeKm: rangeMi * 1.60934,
             timeMins,
@@ -1415,6 +1499,7 @@ export default function EVChargingCalculator() {
               existingGroup.vehicles.push({
                 make: vehicle.make,
                 model: vehicle.model,
+                country: vehicle.country,
                 variants: [vehicle.variant]
               });
             }
@@ -1425,6 +1510,7 @@ export default function EVChargingCalculator() {
               vehicles: [{
                 make: vehicle.make,
                 model: vehicle.model,
+                country: vehicle.country,
                 variants: [vehicle.variant]
               }]
             });
@@ -2309,7 +2395,7 @@ export default function EVChargingCalculator() {
                       <div className="relative">
                         <input 
                           type="range" 
-                          min="5" max="25" step="1"
+                          min="5" max="50" step="1"
                           value={leaderboardVehicleCount} 
                           onChange={(e) => setLeaderboardVehicleCount(Number(e.target.value))}
                           className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer"
@@ -2317,10 +2403,104 @@ export default function EVChargingCalculator() {
                         <div className="flex justify-between items-center mt-2">
                           <span className="text-xs text-slate-500 dark:text-slate-400">5</span>
                           <span className="text-base font-bold text-slate-700 dark:text-slate-200">{leaderboardVehicleCount}</span>
-                          <span className="text-xs text-slate-500 dark:text-slate-400">25</span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">50</span>
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Country Inclusion Filter - Collapsible */}
+                  <div className="mb-3">
+                    <button
+                      onClick={() => setShowCountryFilter(!showCountryFilter)}
+                      className="w-full flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                    >
+                      <span>Include vehicle makes from:</span>
+                      <ChevronDown size={14} className={`transition-transform ${showCountryFilter ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showCountryFilter && (
+                      <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2 max-h-60 overflow-y-auto">
+                        <div className="grid grid-cols-3 gap-1">
+                          {availableCountries.map((country, idx) => {
+                            const flagEmoji = country.code ? String.fromCodePoint(...[...country.code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) : '';
+                            return (
+                              <label key={idx} className="flex items-center gap-1 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 p-1 rounded">
+                                <input
+                                  type="checkbox"
+                                  checked={includedCountries.includes(country.name)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setIncludedCountries([...includedCountries, country.name]);
+                                    } else {
+                                      setIncludedCountries(includedCountries.filter(c => c !== country.name));
+                                    }
+                                    setLeaderboardResults([]);
+                                  }}
+                                  className="w-3 h-3 text-blue-600 rounded focus:ring-blue-500"
+                                />
+                                <span 
+                                  className="text-sm relative group" 
+                                  title={country.fullName}
+                                  onMouseMove={(e) => setMousePosition({ x: e.clientX, y: e.clientY })}
+                                >
+                                  {flagEmoji}
+                                  <span 
+                                    className="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity delay-100 duration-200 fixed px-3 py-1.5 bg-slate-900 dark:bg-slate-700 text-white text-xs rounded whitespace-nowrap pointer-events-none shadow-xl border border-slate-600 dark:border-slate-500"
+                                    style={{
+                                      zIndex: 99999,
+                                      left: `${mousePosition.x}px`,
+                                      top: `${mousePosition.y - 40}px`,
+                                      transform: 'translateX(-50%)'
+                                    }}
+                                  >
+                                    {country.fullName}
+                                  </span>
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Charge Port Region Filter - Collapsible */}
+                  <div className="mb-3">
+                    <button
+                      onClick={() => setShowChargePortFilter(!showChargePortFilter)}
+                      className="w-full flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                    >
+                      <span>Supported charging regions:</span>
+                      <ChevronDown size={14} className={`transition-transform ${showChargePortFilter ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showChargePortFilter && (
+                      <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2 space-y-1">
+                        {[
+                          { value: 'chargeport_type_na', label: 'North America' },
+                          { value: 'chargeport_type_china', label: 'China' },
+                          { value: 'chargeport_type_eu', label: 'Europe' },
+                          { value: 'chargeport_type_japan', label: 'Japan' },
+                          { value: 'chargeport_type_oceania', label: 'Oceania' }
+                        ].map((region) => (
+                          <label key={region.value} className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 p-1 rounded">
+                            <input
+                              type="checkbox"
+                              checked={selectedChargePortRegions.includes(region.value)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedChargePortRegions([...selectedChargePortRegions, region.value]);
+                                } else {
+                                  setSelectedChargePortRegions(selectedChargePortRegions.filter(r => r !== region.value));
+                                }
+                                setLeaderboardResults([]);
+                              }}
+                              className="w-3 h-3 text-blue-600 rounded focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-slate-700 dark:text-slate-200">{region.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Calculate Button */}
@@ -2437,10 +2617,14 @@ export default function EVChargingCalculator() {
                                   onMouseEnter={() => setHoveredCurve({ vehicle, index })}
                                   onMouseLeave={() => setHoveredCurve(null)}
                                 >
-                                  {vehicle.vehicles.map((v, vIdx) => (
+                                  {vehicle.vehicles.map((v, vIdx) => {
+                                    const countryCode = v.country;
+                                    const flagEmoji = countryCode ? String.fromCodePoint(...[...countryCode.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0))) : '';
+                                    return (
                                     <div key={vIdx} className={vIdx > 0 ? 'mt-2 pt-2 border-t border-slate-200 dark:border-slate-700' : ''}>
                                       <div className="flex items-center gap-2">
                                         <div className="font-medium text-slate-800 dark:text-slate-100 hover:text-blue-500 dark:hover:text-blue-400 transition-colors">
+                                          {flagEmoji && <span className="mr-1">{flagEmoji}</span>}
                                           {formatLabel(v.make)} {formatLabel(v.model)}
                                         </div>
                                         {vehicle.isCustom && (
@@ -2462,7 +2646,8 @@ export default function EVChargingCalculator() {
                                         </div>
                                       )}
                                     </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                                 {hoveredCurve?.index === index && (
                                   <div className="absolute left-full ml-2 top-0 z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-2xl p-3 w-64">
