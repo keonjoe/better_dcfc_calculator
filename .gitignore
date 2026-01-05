@@ -47,3 +47,5 @@ coverage
 .idea/
 *.iml
 .DS_Store
+ev-calculator/package-lock.json
+ev-calculator/package-lock.json
