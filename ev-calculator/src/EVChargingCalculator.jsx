@@ -544,7 +544,7 @@ export default function EVChargingCalculator() {
   const [drivingSpeedUnit, setDrivingSpeedUnit] = useState('mph'); // 'mph' or 'kph'
   
   // Leaderboards State
-  const [leaderboardMetric, setLeaderboardMetric] = useState('fastest-charging'); // 'fastest-charging', 'highest-avg-power', 'best-range-per-hour'
+  const [leaderboardMetric, setLeaderboardMetric] = useState('fastest-charging'); // 'fastest-charging', 'highest-avg-power', 'best-range-per-hour', 'most-efficient'
   const [leaderboardStartSoc, setLeaderboardStartSoc] = useState(10);
   const [leaderboardStopSoc, setLeaderboardStopSoc] = useState(80);
   const [leaderboardChargerPower, setLeaderboardChargerPower] = useState(400);
@@ -1238,6 +1238,8 @@ export default function EVChargingCalculator() {
           const rangeAdded = (safeStop - safeStart) / 100 * rangeMi;
           const avgPower = totalHours > 0 ? kwhAdded / totalHours : 0;
           const rangePerHour = totalHours > 0 ? rangeAdded / totalHours : 0;
+          const efficiency = vehicle.battery > 0 ? rangeMi / vehicle.battery : 0;
+          const timePerKwh = vehicle.battery > 0 ? timeMins / vehicle.battery : 0;
 
           return {
             id: vehicle.id,
@@ -1252,6 +1254,8 @@ export default function EVChargingCalculator() {
             avgPower,
             rangePerHour,
             rangeAdded,
+            efficiency,
+            timePerKwh,
             curve: curve // Store curve data for tooltip
           };
         }).filter(r => r !== null);
@@ -1289,6 +1293,8 @@ export default function EVChargingCalculator() {
           const rangeAdded = (safeStop - safeStart) / 100 * rangeMi;
           const avgPower = totalHours > 0 ? kwhAdded / totalHours : 0;
           const rangePerHour = totalHours > 0 ? rangeAdded / totalHours : 0;
+          const efficiency = vehicle.battery > 0 ? rangeMi / vehicle.battery : 0;
+          const timePerKwh = vehicle.battery > 0 ? timeMins / vehicle.battery : 0;
 
           return {
             id: vehicle.id,
@@ -1303,6 +1309,8 @@ export default function EVChargingCalculator() {
             avgPower,
             rangePerHour,
             rangeAdded,
+            efficiency,
+            timePerKwh,
             curve: curve,
             isCustom: true,
             customTag: vehicle.customTag
@@ -1319,6 +1327,8 @@ export default function EVChargingCalculator() {
           sorted.sort((a, b) => b.avgPower - a.avgPower);
         } else if (leaderboardMetric === 'best-range-per-hour') {
           sorted.sort((a, b) => b.rangePerHour - a.rangePerHour);
+        } else if (leaderboardMetric === 'most-efficient') {
+          sorted.sort((a, b) => b.efficiency - a.efficiency);
         }
 
         // Combine vehicles with identical battery and time, even across different makes/models
@@ -1383,6 +1393,8 @@ export default function EVChargingCalculator() {
           perfGroups.sort((a, b) => b.avgPower - a.avgPower);
         } else if (leaderboardMetric === 'best-range-per-hour') {
           perfGroups.sort((a, b) => b.rangePerHour - a.rangePerHour);
+        } else if (leaderboardMetric === 'most-efficient') {
+          perfGroups.sort((a, b) => b.efficiency - a.efficiency);
         }
 
         console.log('Results calculated:', sorted.length, 'Combined to:', perfGroups.length);
@@ -2179,6 +2191,7 @@ export default function EVChargingCalculator() {
                         <option value="fastest-charging">⚡ Fastest Charging Time</option>
                         <option value="highest-avg-power">🔋 Highest Average Power</option>
                         <option value="best-range-per-hour">🏁 Best Range Per Hour</option>
+                        <option value="most-efficient">🍃 Most Efficient</option>
                       </select>
                       <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                     </div>
@@ -2476,6 +2489,7 @@ export default function EVChargingCalculator() {
                     {leaderboardMetric === 'fastest-charging' && '⚡ Fastest Charging Times'}
                     {leaderboardMetric === 'highest-avg-power' && '🔋 Highest Average Power'}
                     {leaderboardMetric === 'best-range-per-hour' && '🏁 Best Range Per Hour'}
+                    {leaderboardMetric === 'most-efficient' && '🍃 Most Efficient Vehicles'}
                   </h3>
                   
                   {isCalculatingLeaderboard ? (
@@ -2511,6 +2525,12 @@ export default function EVChargingCalculator() {
                               <>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Range/Hour</th>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
+                              </>
+                            )}
+                            {leaderboardMetric === 'most-efficient' && (
+                              <>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Efficiency</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charging Speed</th>
                               </>
                             )}
                           </tr>
@@ -2602,6 +2622,18 @@ export default function EVChargingCalculator() {
                                   </td>
                                   <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-200">
                                     {formatTime(vehicle.timeMins)}
+                                  </td>
+                                </>
+                              )}
+                              {leaderboardMetric === 'most-efficient' && (
+                                <>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.efficiency.toFixed(2)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi/kWh</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.efficiency * 1.60934).toFixed(2)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km/kWh</span></div>
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.rangePerHour.toFixed(0)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.rangePerHour * 1.60934).toFixed(0)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph</span></div>
                                   </td>
                                 </>
                               )}
