@@ -1867,7 +1867,7 @@ export default function EVChargingCalculator() {
                   <Linkedin size={16} />
                 </a>
                 <a 
-                  href="https://github.com/keonjoe" 
+                  href="https://github.com/keonjoe/better_dcfc_calculator" 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
@@ -2483,7 +2483,7 @@ export default function EVChargingCalculator() {
                     <Linkedin size={16} />
                   </a>
                   <a 
-                    href="https://github.com/keonjoe" 
+                    href="https://github.com/keonjoe/better_dcfc_calculator" 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
