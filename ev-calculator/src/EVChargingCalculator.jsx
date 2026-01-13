@@ -681,6 +681,28 @@ export default function EVChargingCalculator() {
           setMakes(makesList);
           setAvailableVehicleMakes(makesList); // Set available makes for leaderboard filter
           setSelectedVehicleMakes(makesList); // Select all makes by default
+          
+          // Select random vehicle on app initialization
+          setTimeout(() => {
+            const randomMake = makesList[Math.floor(Math.random() * makesList.length)];
+            const modelsRes = newDb.exec(`SELECT DISTINCT model FROM vehicles WHERE make = '${randomMake}' ORDER BY model ASC`);
+            if (modelsRes.length > 0) {
+              const modelsList = modelsRes[0].values.map(v => v[0]);
+              const randomModel = modelsList[Math.floor(Math.random() * modelsList.length)];
+              
+              const varRes = newDb.exec(`SELECT id, variant FROM vehicles WHERE make = '${randomMake}' AND model = '${randomModel}'`);
+              if (varRes.length > 0) {
+                const variantsList = varRes[0].values.map(v => ({ id: v[0], name: v[1] }));
+                const randomVariant = variantsList[Math.floor(Math.random() * variantsList.length)];
+                
+                setSelectedMake(randomMake);
+                setModels(modelsList);
+                setSelectedModel(randomModel);
+                setVariants(variantsList);
+                setSelectedVariant(randomVariant.id);
+              }
+            }
+          }, 0);
         }
         
         // Load all range scenarios for leaderboard dropdown
