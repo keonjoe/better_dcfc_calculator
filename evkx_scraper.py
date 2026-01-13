@@ -124,7 +124,7 @@ def get_soup(url):
     """Fetches a URL and returns a BeautifulSoup object."""
     try:
         # verify=False bypasses the SSL error
-        response = requests.get(url, headers=HEADERS, timeout=20, verify=True)
+        response = requests.get(url, headers=HEADERS, timeout=20, verify=False)
         response.raise_for_status()
         return BeautifulSoup(response.content, 'html.parser')
     except requests.RequestException as e:
@@ -333,10 +333,20 @@ def parse_range_data(variant_url, vehicle_id, cursor):
                     # Heuristics to distinguish Range vs Consumption
                     if 'kwh' in text:
                         consumption_val = val
+                    elif 'km' in text and 'mi' in text:
+                        # Both units present (e.g., "272 mi (438 km)")
+                        # Extract the km value which is typically in parentheses
+                        km_match = re.search(r'\((\d+)\s*km\)', text)
+                        if km_match:
+                            range_val = float(km_match.group(1))
+                        else:
+                            # Fallback: just use first number if it's after 'km'
+                            range_val = val
                     elif 'km' in text:
                         range_val = val
                     elif 'mi' in text:
-                        pass # Ignore miles, prefer KM (assumed to be present if miles are)
+                        # Only miles present, convert to km (1 mi = 1.60934 km)
+                        range_val = val * 1.60934
                     else:
                         # If no unit text, guess based on magnitude
                         # Consumption usually < 40, Range usually > 50
