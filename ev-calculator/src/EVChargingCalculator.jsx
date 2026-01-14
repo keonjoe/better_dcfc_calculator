@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useContext } from 'react';
 import { Battery, Zap, Clock, MapPin, Settings, Info, Upload, Database, ChevronDown, List, Loader2, Edit3, X, Sun, Moon, Linkedin, Activity, BarChart3, BookOpen } from 'lucide-react';
+import { DarkModeContext } from './App';
 
 const Card = ({ children, className = "" }) => (
   <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 ${className}`}>
@@ -498,7 +499,7 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
 };
 
 export default function EVChargingCalculator() {
-  const [darkMode, setDarkMode] = useState(true); // Default to dark mode
+  const { darkMode, setDarkMode } = useContext(DarkModeContext);
   const [currentPage, setCurrentPage] = useState('calculator'); // 'calculator', 'leaderboards', or 'info'
   const [showTooltip, setShowTooltip] = useState(false);
   const [db, setDb] = useState(null);
@@ -1494,38 +1495,37 @@ export default function EVChargingCalculator() {
   };
 
   return (
-    <div className={darkMode ? "dark" : ""}>
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-4 md:p-6 transition-colors duration-200">
-        
-        <div className="max-w-6xl mx-auto">
-          {/* Header */}
-          <div className="mb-6">
-            <div className="flex justify-between items-end mb-3">
-              <div>
-                <h1 className="text-2xl font-bold flex items-center justify-start gap-2">
-                  <Zap className="text-blue-600 dark:text-blue-400" fill="currentColor" />
-                  A Better DCFC Charging Calculator
-                </h1>
-              </div>
-              
-              <div className="relative">
-                <button 
-                  onClick={() => setDarkMode(!darkMode)}
-                  onMouseEnter={() => setShowTooltip(true)}
-                  onMouseLeave={() => setShowTooltip(false)}
-                  className="p-2 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                >
-                  {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-                </button>
-                {showTooltip && (
-                  <div className="absolute top-full right-0 mt-2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded whitespace-nowrap pointer-events-none z-50">
-                    {darkMode ? "Prepare to be blinded!" : "Join the dark side!"}
-                  </div>
-                )}
-              </div>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-4 md:p-6 transition-colors duration-200">
+      
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex justify-between items-end mb-3">
+            <div>
+              <h1 className="text-2xl font-bold flex items-center justify-start gap-2">
+                <Zap className="text-blue-600 dark:text-blue-400" fill="currentColor" />
+                A Better DCFC Charging Calculator
+              </h1>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="relative">
+              <button 
+                onClick={() => setDarkMode(!darkMode)}
+                onMouseEnter={() => setShowTooltip(true)}
+                onMouseLeave={() => setShowTooltip(false)}
+                className="p-2 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+              {showTooltip && (
+                <div className="absolute top-full right-0 mt-2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded whitespace-nowrap pointer-events-none z-50">
+                  {darkMode ? "Prepare to be blinded!" : "Join the dark side!"}
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2">
               <button
                 onClick={() => setCurrentPage('calculator')}
                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
@@ -2857,6 +2857,5 @@ export default function EVChargingCalculator() {
           )}
       </div>
     </div>
-  </div>
   );
 }
