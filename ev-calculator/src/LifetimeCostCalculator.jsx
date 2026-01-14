@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useContext } from 'react';
-import { Fuel, Zap, TrendingDown, Sun, Moon, Info, Battery, Gauge, Wrench, Car, PiggyBank, Plus, Trash2, Calendar, Globe, Leaf, Factory, Cloud, Trees, Flame, ChevronDown, ChevronUp, ExternalLink, Home, Mountain, RefreshCw, Activity } from 'lucide-react';
+import { Fuel, Zap, TrendingDown, Sun, Moon, Info, Battery, Gauge, Wrench, Car, PiggyBank, Plus, Trash2, Calendar, Globe, Leaf, Factory, Cloud, Trees, Flame, ChevronDown, ChevronUp, ExternalLink, Home, Mountain, RefreshCw, Activity, DollarSign } from 'lucide-react';
 import { DarkModeContext } from './App';
 
 // --- Conversion Constants ---
@@ -550,28 +550,30 @@ const FuelVsCharge = () => {
   return (
     <div className={`${darkMode ? 'dark' : ''} transition-colors duration-300`}>
       <style>{SLIDER_STYLES}</style>
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-4 md:p-8 font-sans text-slate-800 dark:text-slate-100 transition-colors duration-300">
-        <div className="max-w-6xl mx-auto space-y-6">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-6 font-sans text-slate-800 dark:text-slate-100 transition-colors duration-200">
+        <div className="max-w-6xl mx-auto">
           
           {/* Header */}
-          <header className="flex flex-col md:flex-row justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
-            <div className="mb-4 md:mb-0">
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                Fuel vs. Charge
-              </h1>
-              <p className="text-slate-500 dark:text-slate-400 mt-1">Interactive Cost Calculator</p>
+          <div className="mb-6">
+            <div className="flex justify-between items-end mb-3">
+              <div>
+                <h1 className="text-2xl font-bold flex items-center justify-start gap-2">
+                  <DollarSign className="text-blue-600 dark:text-blue-400" />
+                  Fuel vs. Charge Calculator
+                </h1>
+              </div>
             </div>
             
             <div className="flex flex-wrap items-center gap-3">
                
                {/* Currency Dropdown */}
-               <div className="relative group">
-                 <div className="flex items-center bg-slate-100 dark:bg-slate-700 rounded-lg px-3 py-2 cursor-pointer">
-                    <Globe size={16} className="text-slate-500 dark:text-slate-400 mr-2" />
+               <div className="relative">
+                 <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                    <Globe size={16} className="text-slate-600 dark:text-slate-400 mr-2" />
                     <select 
                         value={currency} 
                         onChange={(e) => setCurrency(e.target.value)}
-                        className="bg-transparent appearance-none border-none outline-none font-bold text-slate-700 dark:text-slate-200 cursor-pointer pr-4"
+                        className="bg-transparent appearance-none border-none outline-none font-medium text-slate-800 dark:text-slate-100 cursor-pointer pr-4 text-sm"
                     >
                         {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -579,28 +581,41 @@ const FuelVsCharge = () => {
                </div>
 
                {/* Mode Tabs */}
-               <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-xl overflow-x-auto">
-                 <button 
-                   onClick={() => setActiveTab('operational')}
-                   className={`px-3 sm:px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'operational' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
-                 >
-                   Daily Cost
-                 </button>
-                 <button 
-                   onClick={() => setActiveTab('tco')}
-                   className={`px-3 sm:px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'tco' ? 'bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
-                 >
-                   Lifetime TCO
-                 </button>
-                 <button 
-                   onClick={() => setActiveTab('env')}
-                   className={`px-3 sm:px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center ${activeTab === 'env' ? 'bg-white dark:bg-slate-600 shadow-sm text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
-                 >
-                   <Leaf size={14} className="mr-1"/> Impact
-                 </button>
-               </div>
+               <button
+                 onClick={() => setActiveTab('operational')}
+                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                   activeTab === 'operational' 
+                     ? 'bg-blue-600 text-white' 
+                     : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                 }`}
+               >
+                 <DollarSign size={16} />
+                 Daily Cost
+               </button>
+               <button
+                 onClick={() => setActiveTab('tco')}
+                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                   activeTab === 'tco' 
+                     ? 'bg-blue-600 text-white' 
+                     : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                 }`}
+               >
+                 <Calendar size={16} />
+                 Lifetime TCO
+               </button>
+               <button
+                 onClick={() => setActiveTab('env')}
+                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                   activeTab === 'env' 
+                     ? 'bg-blue-600 text-white' 
+                     : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                 }`}
+               >
+                 <Leaf size={16} />
+                 Impact
+               </button>
             </div>
-          </header>
+          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
