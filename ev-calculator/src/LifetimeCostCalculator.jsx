@@ -225,6 +225,10 @@ const FuelVsCharge = () => {
   const [offsetMetric, setOffsetMetric] = useState('homes'); // 'homes' | 'forest' | 'miles'
   const [showSources, setShowSources] = useState(false);
   const [isUsed, setIsUsed] = useState(false); // Used vs New Vehicle
+  
+  // Acquisition Method States
+  const [gasAcquisitionMethod, setGasAcquisitionMethod] = useState('purchase'); // 'purchase' | 'lease' | 'finance'
+  const [evAcquisitionMethod, setEvAcquisitionMethod] = useState('purchase'); // 'purchase' | 'lease' | 'finance'
 
   // Tooltip State
   const [tooltip, setTooltip] = useState({ show: false, x: 0, y: 0, title: '', value: '' });
@@ -263,12 +267,28 @@ const FuelVsCharge = () => {
       gasTank: 15,
       gasTankUnit: 'gal',
       gasPurchasePrice: 35000,
+      // Gas Lease Options
+      gasLeaseMonthly: 350,
+      gasLeaseDownPayment: 2000,
+      gasLeaseTerm: 36, // months
+      // Gas Finance Options
+      gasFinanceDownPayment: 5000,
+      gasFinanceAPR: 5.5,
+      gasFinanceTerm: 60, // months
       
       elecPrice: 0.15, 
       evRange: 300,
       evRangeUnit: 'mi',
       evBattery: 75,
       evPurchasePrice: 45000,
+      // EV Lease Options
+      evLeaseMonthly: 450,
+      evLeaseDownPayment: 3000,
+      evLeaseTerm: 36, // months
+      // EV Finance Options
+      evFinanceDownPayment: 7000,
+      evFinanceAPR: 4.5,
+      evFinanceTerm: 60, // months
       
       annualDist: 12000,
       annualDistUnit: 'mi',
@@ -433,8 +453,41 @@ const FuelVsCharge = () => {
     const lifetimeGasMaint = calculateMaintCost('gas');
     const lifetimeEvMaint = calculateMaintCost('ev');
 
-    const totalTcoGas = inputs.gasPurchasePrice + lifetimeGasFuel + lifetimeGasMaint;
-    const totalTcoEv = inputs.evPurchasePrice + lifetimeEvFuel + lifetimeEvMaint;
+    // Calculate acquisition costs based on method
+    const calculateAcquisitionCost = (method, vehicleType) => {
+      const prefix = vehicleType === 'gas' ? 'gas' : 'ev';
+      const ownershipMonths = inputs.ownershipYears * 12;
+      
+      if (method === 'purchase') {
+        return inputs[`${prefix}PurchasePrice`];
+      } else if (method === 'lease') {
+        const monthlyPayment = inputs[`${prefix}LeaseMonthly`];
+        const downPayment = inputs[`${prefix}LeaseDownPayment`];
+        const leaseTerm = inputs[`${prefix}LeaseTerm`];
+        
+        // If ownership period exceeds lease term, assume multiple leases
+        const numLeases = Math.ceil(ownershipMonths / leaseTerm);
+        return (downPayment * numLeases) + (monthlyPayment * Math.min(ownershipMonths, leaseTerm * numLeases));
+      } else if (method === 'finance') {
+        const downPayment = inputs[`${prefix}FinanceDownPayment`];
+        const principal = inputs[`${prefix}PurchasePrice`] - downPayment;
+        const monthlyRate = inputs[`${prefix}FinanceAPR`] / 100 / 12;
+        const financeTerm = inputs[`${prefix}FinanceTerm`];
+        
+        // Calculate monthly payment using amortization formula
+        const monthlyPayment = principal * (monthlyRate * Math.pow(1 + monthlyRate, financeTerm)) / (Math.pow(1 + monthlyRate, financeTerm) - 1);
+        
+        // Total paid = down payment + (monthly payment * term)
+        return downPayment + (monthlyPayment * financeTerm);
+      }
+      return 0;
+    };
+
+    const gasAcquisitionCost = calculateAcquisitionCost(gasAcquisitionMethod, 'gas');
+    const evAcquisitionCost = calculateAcquisitionCost(evAcquisitionMethod, 'ev');
+
+    const totalTcoGas = gasAcquisitionCost + lifetimeGasFuel + lifetimeGasMaint;
+    const totalTcoEv = evAcquisitionCost + lifetimeEvFuel + lifetimeEvMaint;
 
     const tcoSavings = Math.abs(totalTcoGas - totalTcoEv);
     const tcoWinner = totalTcoEv < totalTcoGas ? 'EV' : 'Gas';
@@ -504,6 +557,8 @@ const FuelVsCharge = () => {
       lifetimeEvFuel,
       lifetimeGasMaint,
       lifetimeEvMaint,
+      gasAcquisitionCost,
+      evAcquisitionCost,
       totalTcoGas,
       totalTcoEv,
       tcoSavings,
@@ -532,7 +587,7 @@ const FuelVsCharge = () => {
       metricDesc: selectedMetric.desc,
       metricLabel: selectedMetric.label
     };
-  }, [inputs, maintenanceItems, offsetMetric, isUsed]);
+  }, [inputs, maintenanceItems, offsetMetric, isUsed, gasAcquisitionMethod, evAcquisitionMethod]);
 
   // Chart Widths
   const maxCost = Math.max(results.gasCostPerUnitDist, results.evCostPerUnitDist);
@@ -671,16 +726,142 @@ const FuelVsCharge = () => {
 
                 <div className="space-y-6 relative z-10">
                   {activeTab === 'tco' && (
-                     <SliderControl
-                        label="Purchase Price"
-                        icon={PiggyBank}
-                        value={inputs.gasPurchasePrice}
-                        unit={currency}
-                        currency={currency}
-                        onValueChange={(v) => updateInput('gasPurchasePrice', v)}
-                        min={5000} max={150000} step={500}
-                        colorClass="text-orange-500"
-                    />
+                    <>
+                      {/* Acquisition Method Toggle */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                          Acquisition Method
+                        </label>
+                        <div className="flex bg-slate-200 dark:bg-slate-700 p-1 rounded-lg">
+                          <button
+                            onClick={() => setGasAcquisitionMethod('purchase')}
+                            className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all ${
+                              gasAcquisitionMethod === 'purchase'
+                                ? 'bg-orange-500 text-white shadow-md'
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+                            }`}
+                          >
+                            Purchase
+                          </button>
+                          <button
+                            onClick={() => setGasAcquisitionMethod('lease')}
+                            className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all ${
+                              gasAcquisitionMethod === 'lease'
+                                ? 'bg-orange-500 text-white shadow-md'
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+                            }`}
+                          >
+                            Lease
+                          </button>
+                          <button
+                            onClick={() => setGasAcquisitionMethod('finance')}
+                            className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all ${
+                              gasAcquisitionMethod === 'finance'
+                                ? 'bg-orange-500 text-white shadow-md'
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+                            }`}
+                          >
+                            Finance
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Purchase Fields */}
+                      {gasAcquisitionMethod === 'purchase' && (
+                        <SliderControl
+                          label="Purchase Price"
+                          icon={PiggyBank}
+                          value={inputs.gasPurchasePrice}
+                          unit={currency}
+                          currency={currency}
+                          onValueChange={(v) => updateInput('gasPurchasePrice', v)}
+                          min={5000} max={150000} step={500}
+                          colorClass="text-orange-500"
+                        />
+                      )}
+
+                      {/* Lease Fields */}
+                      {gasAcquisitionMethod === 'lease' && (
+                        <>
+                          <SliderControl
+                            label="Monthly Payment"
+                            icon={Calendar}
+                            value={inputs.gasLeaseMonthly}
+                            unit={`${currency}/mo`}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('gasLeaseMonthly', v)}
+                            min={100} max={2000} step={10}
+                            colorClass="text-orange-500"
+                          />
+                          <SliderControl
+                            label="Down Payment"
+                            icon={DollarSign}
+                            value={inputs.gasLeaseDownPayment}
+                            unit={currency}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('gasLeaseDownPayment', v)}
+                            min={0} max={10000} step={100}
+                            colorClass="text-orange-500"
+                          />
+                          <SliderControl
+                            label="Lease Term"
+                            icon={Calendar}
+                            value={inputs.gasLeaseTerm}
+                            unit="months"
+                            currency={currency}
+                            onValueChange={(v) => updateInput('gasLeaseTerm', v)}
+                            min={12} max={60} step={1}
+                            colorClass="text-orange-500"
+                          />
+                        </>
+                      )}
+
+                      {/* Finance Fields */}
+                      {gasAcquisitionMethod === 'finance' && (
+                        <>
+                          <SliderControl
+                            label="Vehicle Price"
+                            icon={PiggyBank}
+                            value={inputs.gasPurchasePrice}
+                            unit={currency}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('gasPurchasePrice', v)}
+                            min={5000} max={150000} step={500}
+                            colorClass="text-orange-500"
+                          />
+                          <SliderControl
+                            label="Down Payment"
+                            icon={DollarSign}
+                            value={inputs.gasFinanceDownPayment}
+                            unit={currency}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('gasFinanceDownPayment', v)}
+                            min={0} max={50000} step={500}
+                            colorClass="text-orange-500"
+                          />
+                          <SliderControl
+                            label="APR"
+                            icon={Activity}
+                            value={inputs.gasFinanceAPR}
+                            unit="%"
+                            currency={currency}
+                            onValueChange={(v) => updateInput('gasFinanceAPR', v)}
+                            min={0} max={15} step={0.1}
+                            colorClass="text-orange-500"
+                          />
+                          <SliderControl
+                            label="Loan Term"
+                            icon={Calendar}
+                            value={inputs.gasFinanceTerm}
+                            unit="months"
+                            currency={currency}
+                            onValueChange={(v) => updateInput('gasFinanceTerm', v)}
+                            min={12} max={84} step={1}
+                            colorClass="text-orange-500"
+                          />
+                        </>
+                      )}
+                    </>
                   )}
                   {activeTab !== 'env' && (
                   <SliderControl
@@ -736,16 +917,142 @@ const FuelVsCharge = () => {
 
                 <div className="space-y-6 relative z-10">
                   {activeTab === 'tco' && (
-                     <SliderControl
-                        label="Purchase Price"
-                        icon={PiggyBank}
-                        value={inputs.evPurchasePrice}
-                        unit={currency}
-                        currency={currency}
-                        onValueChange={(v) => updateInput('evPurchasePrice', v)}
-                        min={5000} max={150000} step={500}
-                        colorClass="text-emerald-500"
-                    />
+                    <>
+                      {/* Acquisition Method Toggle */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                          Acquisition Method
+                        </label>
+                        <div className="flex bg-slate-200 dark:bg-slate-700 p-1 rounded-lg">
+                          <button
+                            onClick={() => setEvAcquisitionMethod('purchase')}
+                            className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all ${
+                              evAcquisitionMethod === 'purchase'
+                                ? 'bg-emerald-500 text-white shadow-md'
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+                            }`}
+                          >
+                            Purchase
+                          </button>
+                          <button
+                            onClick={() => setEvAcquisitionMethod('lease')}
+                            className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all ${
+                              evAcquisitionMethod === 'lease'
+                                ? 'bg-emerald-500 text-white shadow-md'
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+                            }`}
+                          >
+                            Lease
+                          </button>
+                          <button
+                            onClick={() => setEvAcquisitionMethod('finance')}
+                            className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all ${
+                              evAcquisitionMethod === 'finance'
+                                ? 'bg-emerald-500 text-white shadow-md'
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+                            }`}
+                          >
+                            Finance
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Purchase Fields */}
+                      {evAcquisitionMethod === 'purchase' && (
+                        <SliderControl
+                          label="Purchase Price"
+                          icon={PiggyBank}
+                          value={inputs.evPurchasePrice}
+                          unit={currency}
+                          currency={currency}
+                          onValueChange={(v) => updateInput('evPurchasePrice', v)}
+                          min={5000} max={150000} step={500}
+                          colorClass="text-emerald-500"
+                        />
+                      )}
+
+                      {/* Lease Fields */}
+                      {evAcquisitionMethod === 'lease' && (
+                        <>
+                          <SliderControl
+                            label="Monthly Payment"
+                            icon={Calendar}
+                            value={inputs.evLeaseMonthly}
+                            unit={`${currency}/mo`}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('evLeaseMonthly', v)}
+                            min={100} max={2000} step={10}
+                            colorClass="text-emerald-500"
+                          />
+                          <SliderControl
+                            label="Down Payment"
+                            icon={DollarSign}
+                            value={inputs.evLeaseDownPayment}
+                            unit={currency}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('evLeaseDownPayment', v)}
+                            min={0} max={10000} step={100}
+                            colorClass="text-emerald-500"
+                          />
+                          <SliderControl
+                            label="Lease Term"
+                            icon={Calendar}
+                            value={inputs.evLeaseTerm}
+                            unit="months"
+                            currency={currency}
+                            onValueChange={(v) => updateInput('evLeaseTerm', v)}
+                            min={12} max={60} step={1}
+                            colorClass="text-emerald-500"
+                          />
+                        </>
+                      )}
+
+                      {/* Finance Fields */}
+                      {evAcquisitionMethod === 'finance' && (
+                        <>
+                          <SliderControl
+                            label="Vehicle Price"
+                            icon={PiggyBank}
+                            value={inputs.evPurchasePrice}
+                            unit={currency}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('evPurchasePrice', v)}
+                            min={5000} max={150000} step={500}
+                            colorClass="text-emerald-500"
+                          />
+                          <SliderControl
+                            label="Down Payment"
+                            icon={DollarSign}
+                            value={inputs.evFinanceDownPayment}
+                            unit={currency}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('evFinanceDownPayment', v)}
+                            min={0} max={50000} step={500}
+                            colorClass="text-emerald-500"
+                          />
+                          <SliderControl
+                            label="APR"
+                            icon={Activity}
+                            value={inputs.evFinanceAPR}
+                            unit="%"
+                            currency={currency}
+                            onValueChange={(v) => updateInput('evFinanceAPR', v)}
+                            min={0} max={15} step={0.1}
+                            colorClass="text-emerald-500"
+                          />
+                          <SliderControl
+                            label="Loan Term"
+                            icon={Calendar}
+                            value={inputs.evFinanceTerm}
+                            unit="months"
+                            currency={currency}
+                            onValueChange={(v) => updateInput('evFinanceTerm', v)}
+                            min={12} max={84} step={1}
+                            colorClass="text-emerald-500"
+                          />
+                        </>
+                      )}
+                    </>
                   )}
                   {activeTab !== 'env' && (
                   <SliderControl
@@ -985,13 +1292,13 @@ const FuelVsCharge = () => {
                                 </span>
                             </div>
                             <div className="h-14 bg-slate-100 dark:bg-slate-700 rounded-xl relative flex">
-                                {/* Purchase */}
+                                {/* Acquisition Cost */}
                                 <ChartSegment
-                                    width={getTcoBarWidth(inputs.gasPurchasePrice)}
+                                    width={getTcoBarWidth(results.gasAcquisitionCost)}
                                     color="bg-slate-400"
                                     label="Car"
-                                    tooltipTitle="Purchase Price"
-                                    tooltipValue={`${currency}${inputs.gasPurchasePrice.toLocaleString()}`}
+                                    tooltipTitle={gasAcquisitionMethod === 'purchase' ? 'Purchase Price' : gasAcquisitionMethod === 'lease' ? 'Lease Payments' : 'Finance Total'}
+                                    tooltipValue={`${currency}${results.gasAcquisitionCost.toLocaleString()}`}
                                     onHover={handleSegmentHover}
                                     onLeave={handleSegmentLeave}
                                 />
@@ -1029,13 +1336,13 @@ const FuelVsCharge = () => {
                                 </span>
                             </div>
                             <div className="h-14 bg-slate-100 dark:bg-slate-700 rounded-xl relative flex">
-                                {/* Purchase */}
+                                {/* Acquisition Cost */}
                                 <ChartSegment
-                                    width={getTcoBarWidth(inputs.evPurchasePrice)}
+                                    width={getTcoBarWidth(results.evAcquisitionCost)}
                                     color="bg-slate-400"
                                     label="Car"
-                                    tooltipTitle="Purchase Price"
-                                    tooltipValue={`${currency}${inputs.evPurchasePrice.toLocaleString()}`}
+                                    tooltipTitle={evAcquisitionMethod === 'purchase' ? 'Purchase Price' : evAcquisitionMethod === 'lease' ? 'Lease Payments' : 'Finance Total'}
+                                    tooltipValue={`${currency}${results.evAcquisitionCost.toLocaleString()}`}
                                     onHover={handleSegmentHover}
                                     onLeave={handleSegmentLeave}
                                 />
@@ -1065,7 +1372,7 @@ const FuelVsCharge = () => {
                     
                     {/* Legend */}
                     <div className="flex justify-center space-x-6 mt-6 text-xs text-slate-500 font-medium">
-                        <div className="flex items-center"><div className="w-3 h-3 bg-slate-400 rounded-full mr-2"></div>Purchase Price</div>
+                        <div className="flex items-center"><div className="w-3 h-3 bg-slate-400 rounded-full mr-2"></div>Vehicle Cost</div>
                         <div className="flex items-center"><div className="w-3 h-3 bg-gradient-to-r from-orange-400 to-emerald-400 rounded-full mr-2"></div>Fuel/Energy</div>
                         <div className="flex items-center"><div className="w-3 h-3 bg-red-400 rounded-full mr-2"></div>Maintenance</div>
                     </div>
