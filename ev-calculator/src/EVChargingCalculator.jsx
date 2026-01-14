@@ -512,6 +512,7 @@ export default function EVChargingCalculator() {
   const [makes, setMakes] = useState([]);
   const [models, setModels] = useState([]);
   const [variants, setVariants] = useState([]);
+  const [excludeChineseMakes, setExcludeChineseMakes] = useState(true);
   
   const [selectedMake, setSelectedMake] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
@@ -704,7 +705,13 @@ export default function EVChargingCalculator() {
         const newDb = new SQL.Database(uInt8Array);
         setDb(newDb);
         
-        const res = newDb.exec("SELECT DISTINCT make FROM vehicles ORDER BY make COLLATE NOCASE ASC");
+        let query = "SELECT DISTINCT make FROM vehicles";
+        if (excludeChineseMakes) {
+          query += " WHERE country != 'CN'";
+        }
+        query += " ORDER BY make COLLATE NOCASE ASC";
+        
+        const res = newDb.exec(query);
         if (res.length > 0) {
           // Trim whitespace and sort again in JavaScript to ensure proper ordering
           const makesList = res[0].values.map(v => v[0].trim()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
@@ -795,6 +802,25 @@ export default function EVChargingCalculator() {
     };
     loadDatabase();
   }, []);
+
+  // Filter makes based on Chinese exclusion setting
+  useEffect(() => {
+    if (!db) return;
+    
+    let query = "SELECT DISTINCT make FROM vehicles";
+    if (excludeChineseMakes) {
+      query += " WHERE country != 'CN'";
+    }
+    query += " ORDER BY make COLLATE NOCASE ASC";
+    
+    const res = db.exec(query);
+    if (res.length > 0) {
+      const makesList = res[0].values.map(v => v[0].trim()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      setMakes(makesList);
+      setAvailableVehicleMakes(makesList);
+      setSelectedVehicleMakes(makesList);
+    }
+  }, [db, excludeChineseMakes]);
 
   // --- Update available makes when country filter changes ---
   useEffect(() => {
@@ -1632,6 +1658,16 @@ export default function EVChargingCalculator() {
                       Surprise Me!
                     </button>
                   </div>
+                  
+                  <label className="flex items-center gap-1.5 text-[9px] text-slate-600 dark:text-slate-400 cursor-pointer mb-2">
+                    <input
+                      type="checkbox"
+                      checked={excludeChineseMakes}
+                      onChange={(e) => setExcludeChineseMakes(e.target.checked)}
+                      className="w-3 h-3 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-1 focus:ring-blue-500 dark:bg-slate-700"
+                    />
+                    Exclude Chinese Makes
+                  </label>
                   
                   <div className="space-y-2">
                     <div>
