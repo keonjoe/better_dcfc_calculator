@@ -453,13 +453,18 @@ const FuelVsCharge = () => {
     const lifetimeGasMaint = calculateMaintCost('gas');
     const lifetimeEvMaint = calculateMaintCost('ev');
 
-    // Calculate acquisition costs based on method
-    const calculateAcquisitionCost = (method, vehicleType) => {
+    // Calculate acquisition costs based on method with breakdown
+    const calculateAcquisitionBreakdown = (method, vehicleType) => {
       const prefix = vehicleType === 'gas' ? 'gas' : 'ev';
       const ownershipMonths = inputs.ownershipYears * 12;
       
       if (method === 'purchase') {
-        return inputs[`${prefix}PurchasePrice`];
+        return {
+          total: inputs[`${prefix}PurchasePrice`],
+          downPayment: inputs[`${prefix}PurchasePrice`],
+          monthlyPayments: 0,
+          interest: 0
+        };
       } else if (method === 'lease') {
         const monthlyPayment = inputs[`${prefix}LeaseMonthly`];
         const downPayment = inputs[`${prefix}LeaseDownPayment`];
@@ -467,7 +472,15 @@ const FuelVsCharge = () => {
         
         // If ownership period exceeds lease term, assume multiple leases
         const numLeases = Math.ceil(ownershipMonths / leaseTerm);
-        return (downPayment * numLeases) + (monthlyPayment * Math.min(ownershipMonths, leaseTerm * numLeases));
+        const totalDownPayments = downPayment * numLeases;
+        const totalMonthlyPayments = monthlyPayment * Math.min(ownershipMonths, leaseTerm * numLeases);
+        
+        return {
+          total: totalDownPayments + totalMonthlyPayments,
+          downPayment: totalDownPayments,
+          monthlyPayments: totalMonthlyPayments,
+          interest: 0 // Lease interest is included in monthly payment
+        };
       } else if (method === 'finance') {
         const downPayment = inputs[`${prefix}FinanceDownPayment`];
         const principal = inputs[`${prefix}PurchasePrice`] - downPayment;
@@ -476,15 +489,24 @@ const FuelVsCharge = () => {
         
         // Calculate monthly payment using amortization formula
         const monthlyPayment = principal * (monthlyRate * Math.pow(1 + monthlyRate, financeTerm)) / (Math.pow(1 + monthlyRate, financeTerm) - 1);
+        const totalPayments = monthlyPayment * financeTerm;
+        const totalInterest = totalPayments - principal;
         
-        // Total paid = down payment + (monthly payment * term)
-        return downPayment + (monthlyPayment * financeTerm);
+        return {
+          total: downPayment + totalPayments,
+          downPayment: downPayment,
+          monthlyPayments: principal, // Principal portion
+          interest: totalInterest
+        };
       }
-      return 0;
+      return { total: 0, downPayment: 0, monthlyPayments: 0, interest: 0 };
     };
 
-    const gasAcquisitionCost = calculateAcquisitionCost(gasAcquisitionMethod, 'gas');
-    const evAcquisitionCost = calculateAcquisitionCost(evAcquisitionMethod, 'ev');
+    const gasAcquisitionBreakdown = calculateAcquisitionBreakdown(gasAcquisitionMethod, 'gas');
+    const evAcquisitionBreakdown = calculateAcquisitionBreakdown(evAcquisitionMethod, 'ev');
+    
+    const gasAcquisitionCost = gasAcquisitionBreakdown.total;
+    const evAcquisitionCost = evAcquisitionBreakdown.total;
 
     const totalTcoGas = gasAcquisitionCost + lifetimeGasFuel + lifetimeGasMaint;
     const totalTcoEv = evAcquisitionCost + lifetimeEvFuel + lifetimeEvMaint;
@@ -559,6 +581,8 @@ const FuelVsCharge = () => {
       lifetimeEvMaint,
       gasAcquisitionCost,
       evAcquisitionCost,
+      gasAcquisitionBreakdown,
+      evAcquisitionBreakdown,
       totalTcoGas,
       totalTcoEv,
       tcoSavings,
@@ -1292,16 +1316,54 @@ const FuelVsCharge = () => {
                                 </span>
                             </div>
                             <div className="h-14 bg-slate-100 dark:bg-slate-700 rounded-xl relative flex">
-                                {/* Acquisition Cost */}
-                                <ChartSegment
-                                    width={getTcoBarWidth(results.gasAcquisitionCost)}
+                                {/* Acquisition Cost Breakdown */}
+                                {gasAcquisitionMethod === 'purchase' ? (
+                                  <ChartSegment
+                                    width={getTcoBarWidth(results.gasAcquisitionBreakdown.downPayment)}
                                     color="bg-slate-400"
-                                    label="Car"
-                                    tooltipTitle={gasAcquisitionMethod === 'purchase' ? 'Purchase Price' : gasAcquisitionMethod === 'lease' ? 'Lease Payments' : 'Finance Total'}
-                                    tooltipValue={`${currency}${results.gasAcquisitionCost.toLocaleString()}`}
+                                    label="Purchase"
+                                    tooltipTitle="Purchase Price"
+                                    tooltipValue={`${currency}${results.gasAcquisitionBreakdown.downPayment.toLocaleString()}`}
                                     onHover={handleSegmentHover}
                                     onLeave={handleSegmentLeave}
-                                />
+                                  />
+                                ) : (
+                                  <>
+                                    {results.gasAcquisitionBreakdown.downPayment > 0 && (
+                                      <ChartSegment
+                                        width={getTcoBarWidth(results.gasAcquisitionBreakdown.downPayment)}
+                                        color="bg-slate-500"
+                                        label="Down"
+                                        tooltipTitle="Down Payment"
+                                        tooltipValue={`${currency}${results.gasAcquisitionBreakdown.downPayment.toLocaleString()}`}
+                                        onHover={handleSegmentHover}
+                                        onLeave={handleSegmentLeave}
+                                      />
+                                    )}
+                                    {results.gasAcquisitionBreakdown.monthlyPayments > 0 && (
+                                      <ChartSegment
+                                        width={getTcoBarWidth(results.gasAcquisitionBreakdown.monthlyPayments)}
+                                        color="bg-slate-400"
+                                        label={gasAcquisitionMethod === 'lease' ? 'Lease' : 'Principal'}
+                                        tooltipTitle={gasAcquisitionMethod === 'lease' ? 'Lease Payments' : 'Principal Payments'}
+                                        tooltipValue={`${currency}${results.gasAcquisitionBreakdown.monthlyPayments.toLocaleString()}`}
+                                        onHover={handleSegmentHover}
+                                        onLeave={handleSegmentLeave}
+                                      />
+                                    )}
+                                    {results.gasAcquisitionBreakdown.interest > 0 && (
+                                      <ChartSegment
+                                        width={getTcoBarWidth(results.gasAcquisitionBreakdown.interest)}
+                                        color="bg-slate-300"
+                                        label="Interest"
+                                        tooltipTitle="Interest"
+                                        tooltipValue={`${currency}${results.gasAcquisitionBreakdown.interest.toLocaleString()}`}
+                                        onHover={handleSegmentHover}
+                                        onLeave={handleSegmentLeave}
+                                      />
+                                    )}
+                                  </>
+                                )}
                                 {/* Fuel */}
                                 <ChartSegment
                                     width={getTcoBarWidth(results.lifetimeGasFuel)}
@@ -1336,16 +1398,54 @@ const FuelVsCharge = () => {
                                 </span>
                             </div>
                             <div className="h-14 bg-slate-100 dark:bg-slate-700 rounded-xl relative flex">
-                                {/* Acquisition Cost */}
-                                <ChartSegment
-                                    width={getTcoBarWidth(results.evAcquisitionCost)}
+                                {/* Acquisition Cost Breakdown */}
+                                {evAcquisitionMethod === 'purchase' ? (
+                                  <ChartSegment
+                                    width={getTcoBarWidth(results.evAcquisitionBreakdown.downPayment)}
                                     color="bg-slate-400"
-                                    label="Car"
-                                    tooltipTitle={evAcquisitionMethod === 'purchase' ? 'Purchase Price' : evAcquisitionMethod === 'lease' ? 'Lease Payments' : 'Finance Total'}
-                                    tooltipValue={`${currency}${results.evAcquisitionCost.toLocaleString()}`}
+                                    label="Purchase"
+                                    tooltipTitle="Purchase Price"
+                                    tooltipValue={`${currency}${results.evAcquisitionBreakdown.downPayment.toLocaleString()}`}
                                     onHover={handleSegmentHover}
                                     onLeave={handleSegmentLeave}
-                                />
+                                  />
+                                ) : (
+                                  <>
+                                    {results.evAcquisitionBreakdown.downPayment > 0 && (
+                                      <ChartSegment
+                                        width={getTcoBarWidth(results.evAcquisitionBreakdown.downPayment)}
+                                        color="bg-slate-500"
+                                        label="Down"
+                                        tooltipTitle="Down Payment"
+                                        tooltipValue={`${currency}${results.evAcquisitionBreakdown.downPayment.toLocaleString()}`}
+                                        onHover={handleSegmentHover}
+                                        onLeave={handleSegmentLeave}
+                                      />
+                                    )}
+                                    {results.evAcquisitionBreakdown.monthlyPayments > 0 && (
+                                      <ChartSegment
+                                        width={getTcoBarWidth(results.evAcquisitionBreakdown.monthlyPayments)}
+                                        color="bg-slate-400"
+                                        label={evAcquisitionMethod === 'lease' ? 'Lease' : 'Principal'}
+                                        tooltipTitle={evAcquisitionMethod === 'lease' ? 'Lease Payments' : 'Principal Payments'}
+                                        tooltipValue={`${currency}${results.evAcquisitionBreakdown.monthlyPayments.toLocaleString()}`}
+                                        onHover={handleSegmentHover}
+                                        onLeave={handleSegmentLeave}
+                                      />
+                                    )}
+                                    {results.evAcquisitionBreakdown.interest > 0 && (
+                                      <ChartSegment
+                                        width={getTcoBarWidth(results.evAcquisitionBreakdown.interest)}
+                                        color="bg-slate-300"
+                                        label="Interest"
+                                        tooltipTitle="Interest"
+                                        tooltipValue={`${currency}${results.evAcquisitionBreakdown.interest.toLocaleString()}`}
+                                        onHover={handleSegmentHover}
+                                        onLeave={handleSegmentLeave}
+                                      />
+                                    )}
+                                  </>
+                                )}
                                 {/* Fuel */}
                                 <ChartSegment
                                     width={getTcoBarWidth(results.lifetimeEvFuel)}
@@ -1371,8 +1471,19 @@ const FuelVsCharge = () => {
                     </div>
                     
                     {/* Legend */}
-                    <div className="flex justify-center space-x-6 mt-6 text-xs text-slate-500 font-medium">
-                        <div className="flex items-center"><div className="w-3 h-3 bg-slate-400 rounded-full mr-2"></div>Vehicle Cost</div>
+                    <div className="flex flex-wrap justify-center gap-4 mt-6 text-xs text-slate-500 font-medium">
+                        {(gasAcquisitionMethod !== 'purchase' || evAcquisitionMethod !== 'purchase') && (
+                          <>
+                            <div className="flex items-center"><div className="w-3 h-3 bg-slate-500 rounded-full mr-2"></div>Down Payment</div>
+                            <div className="flex items-center"><div className="w-3 h-3 bg-slate-400 rounded-full mr-2"></div>{gasAcquisitionMethod === 'lease' || evAcquisitionMethod === 'lease' ? 'Lease/Principal' : 'Principal'}</div>
+                            {(gasAcquisitionMethod === 'finance' || evAcquisitionMethod === 'finance') && (
+                              <div className="flex items-center"><div className="w-3 h-3 bg-slate-300 rounded-full mr-2"></div>Interest</div>
+                            )}
+                          </>
+                        )}
+                        {(gasAcquisitionMethod === 'purchase' && evAcquisitionMethod === 'purchase') && (
+                          <div className="flex items-center"><div className="w-3 h-3 bg-slate-400 rounded-full mr-2"></div>Purchase Price</div>
+                        )}
                         <div className="flex items-center"><div className="w-3 h-3 bg-gradient-to-r from-orange-400 to-emerald-400 rounded-full mr-2"></div>Fuel/Energy</div>
                         <div className="flex items-center"><div className="w-3 h-3 bg-red-400 rounded-full mr-2"></div>Maintenance</div>
                     </div>
