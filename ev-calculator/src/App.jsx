@@ -1,4 +1,4 @@
-import { useState, createContext } from 'react'
+import { useState, createContext, useEffect } from 'react'
 import EVChargingCalculator from './EVChargingCalculator'
 import LifetimeCostCalculator from './LifetimeCostCalculator'
 import SiteROICalc from './SiteROICalc'
@@ -13,6 +13,19 @@ function App() {
   const [darkMode, setDarkMode] = useState(true) // Default to dark mode
   const [currentApp, setCurrentApp] = useState('charging') // 'charging' or 'lifetime'
   const [showTooltip, setShowTooltip] = useState(false)
+
+  // Clear all persisted data when user exits the site
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      localStorage.clear();
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
 
   return (
     <DarkModeContext.Provider value={{ darkMode, setDarkMode }}>

@@ -33,7 +33,7 @@ const DEFAULT_VEHICLES = [
   { make: 'Rivian', model: 'r1', variant: 'r1t_performance_dual-motor_awd_lp', populationShare: 8 },
   { make: 'Tesla', model: 'model_s', variant: 'model_s_awd', populationShare: 8 },
   { make: 'Chevrolet', model: 'bolt', variant: 'bolt', populationShare: 8 },
-  { make: 'Hyundai', model: 'ioniq_5', variant: 'Ioniq_5_xrt', populationShare: 17 },
+  { make: 'Hyundai', model: 'ioniq_5', variant: 'ioniq_5_long_range_awd', populationShare: 17 },
   { make: 'Mercedes', model: 'eqe', variant: 'eqe_350_4matic', populationShare: 10 },
 ];
 
@@ -180,12 +180,35 @@ export default function DCFCCalculator() {
     const saved = localStorage.getItem('siteROIVehicles');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // If saved data is not empty, use it
+        if (parsed && parsed.length > 0) {
+          return parsed;
+        }
       } catch (e) {
         console.error('Failed to parse saved Site ROI vehicles:', e);
       }
     }
+    // Return empty - we'll load defaults via useEffect when database is ready
     return [];
+  });
+
+  // Track if we should load defaults
+  const [shouldLoadDefaults, setShouldLoadDefaults] = useState(() => {
+    const saved = localStorage.getItem('siteROIVehicles');
+    const hasInitialized = sessionStorage.getItem('siteROIInitialized');
+    
+    // Load defaults if: no saved data OR saved data is empty, AND not yet initialized this session
+    if (!hasInitialized) {
+      if (!saved) return true;
+      try {
+        const parsed = JSON.parse(saved);
+        return !parsed || parsed.length === 0;
+      } catch {
+        return true;
+      }
+    }
+    return false;
   });
   
   // Vehicle Selection State (for adding new vehicles)
@@ -256,6 +279,15 @@ export default function DCFCCalculator() {
       setMakes(makesList);
     }
   }, [db, excludeChineseMakes]);
+
+  // Load default vehicles when database is ready and it's first visit
+  useEffect(() => {
+    if (db && shouldLoadDefaults && vehicles.length === 0) {
+      loadDefaultVehicleMix();
+      setShouldLoadDefaults(false);
+      sessionStorage.setItem('siteROIInitialized', 'true');
+    }
+  }, [db, shouldLoadDefaults]);
 
   // Update models when make is selected
   useEffect(() => {
@@ -479,6 +511,53 @@ export default function DCFCCalculator() {
     const newArr = [...inputs.customYearlyUtilization];
     newArr[index] = value;
     setInputs(prev => ({ ...prev, customYearlyUtilization: newArr }));
+  };
+
+  const loadDefaultVehicleMix = () => {
+    if (!db) {
+      console.error('Database not loaded yet');
+      return;
+    }
+
+    try {
+      const loadedVehicles = [];
+      
+      for (const defaultVehicle of DEFAULT_VEHICLES) {
+        // Query database to get the vehicle ID
+        const res = db.exec(
+          `SELECT id, make, model, variant FROM vehicles WHERE make = ? AND model = ? AND variant = ?`,
+          [defaultVehicle.make, defaultVehicle.model, defaultVehicle.variant]
+        );
+        
+        if (res.length > 0 && res[0].values.length > 0) {
+          const [id, make, model, variant] = res[0].values[0];
+          const metrics = calculateVehicleMetrics(id, inputs.avgStartSoC, inputs.avgEndSoC, inputs.performanceDerating);
+          
+          if (metrics.battery > 0 && metrics.avgKw > 0) {
+            loadedVehicles.push({
+              id: id,
+              name: `${formatLabel(make)} ${formatLabel(model)} ${formatLabel(variant)}`,
+              battery: metrics.battery,
+              avgKw: metrics.avgKw,
+              populationShare: defaultVehicle.populationShare,
+              variantId: id
+            });
+          } else {
+            console.warn(`Could not load metrics for ${defaultVehicle.make} ${defaultVehicle.model} ${defaultVehicle.variant}`);
+          }
+        } else {
+          console.warn(`Vehicle not found in database: ${defaultVehicle.make} ${defaultVehicle.model} ${defaultVehicle.variant}`);
+        }
+      }
+      
+      if (loadedVehicles.length > 0) {
+        setVehicles(loadedVehicles);
+      } else {
+        console.error('Failed to load any default vehicles');
+      }
+    } catch (err) {
+      console.error('Error loading default vehicle mix:', err);
+    }
   };
 
   // --- Calculation Engine ---
@@ -1060,6 +1139,13 @@ export default function DCFCCalculator() {
                 <p className="text-slate-500 dark:text-slate-400 max-w-md mb-4">
                   Add at least one vehicle to the Vehicle Mix in the Site Parameters tab to see financial projections and ROI analysis.
                 </p>
+                <button
+                  onClick={loadDefaultVehicleMix}
+                  className="mb-4 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-md transition-all duration-200 flex items-center gap-2 mx-auto"
+                >
+                  <Truck className="w-5 h-5" />
+                  Use Default Vehicle Mix
+                </button>
                 <div className="flex flex-col gap-2 text-sm text-slate-600 dark:text-slate-400">
                   <div className="flex items-center gap-2">
                     <AlertCircle className="w-4 h-4" />
