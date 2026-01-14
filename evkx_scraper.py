@@ -232,8 +232,10 @@ def scrape_variants(model_url):
         
         # Check if link is a child of the model URL
         if model_url.rstrip('/') in full_url and len(full_url) > len(model_url):
-            # Exclude tabs/sub-sections
-            if any(x in full_url for x in ['gallery', 'reviews','range','chargingcurve','specifications']):
+            # Exclude tabs/sub-sections (but not variant names containing these words)
+            # Check if these are actual sub-pages (ending with these paths)
+            url_parts = full_url.rstrip('/').split('/')
+            if len(url_parts) > 5 and url_parts[-1] in ['gallery', 'reviews', 'rangeandconsumption', 'range', 'chargingcurve', 'specifications']:
                 continue
             
             variant_name = full_url.rstrip("/").split("/")[-1]
