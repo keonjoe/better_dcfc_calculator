@@ -499,9 +499,8 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
 };
 
 export default function EVChargingCalculator() {
-  const { darkMode, setDarkMode } = useContext(DarkModeContext);
+  const { darkMode } = useContext(DarkModeContext);
   const [currentPage, setCurrentPage] = useState('calculator'); // 'calculator', 'leaderboards', or 'info'
-  const [showTooltip, setShowTooltip] = useState(false);
   const [db, setDb] = useState(null);
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -556,7 +555,17 @@ export default function EVChargingCalculator() {
   const [leaderboardSelectedScenario, setLeaderboardSelectedScenario] = useState('');
   const [hoveredCurve, setHoveredCurve] = useState(null);
   const [infoFeatureView, setInfoFeatureView] = useState('calculator'); // 'calculator' or 'leaderboard'
-  const [customLeaderboardVehicles, setCustomLeaderboardVehicles] = useState([]); // Custom vehicles for leaderboard
+  const [customLeaderboardVehicles, setCustomLeaderboardVehicles] = useState(() => {
+    const saved = localStorage.getItem('customLeaderboardVehicles');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse saved custom leaderboard vehicles:', e);
+      }
+    }
+    return [];
+  }); // Custom vehicles for leaderboard
   const [customTagLabel, setCustomTagLabel] = useState('Custom'); // Label for custom tag
   const [leaderboardFeedback, setLeaderboardFeedback] = useState(''); // Feedback message for add to leaderboard
   const [availableCountries, setAvailableCountries] = useState([]); // List of all countries from database
@@ -593,8 +602,28 @@ export default function EVChargingCalculator() {
   }, [maxRangeUnit, mode, dbRangeKm]);
 
   // Comparison
-  const [comparisonScenarios, setComparisonScenarios] = useState([]);
+  const [comparisonScenarios, setComparisonScenarios] = useState(() => {
+    const saved = localStorage.getItem('comparisonScenarios');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse saved comparison scenarios:', e);
+      }
+    }
+    return [];
+  });
   const [comparisonViewMode, setComparisonViewMode] = useState('single'); // 'single' or 'roadtrip'
+
+  // Save comparison scenarios to localStorage
+  useEffect(() => {
+    localStorage.setItem('comparisonScenarios', JSON.stringify(comparisonScenarios));
+  }, [comparisonScenarios]);
+
+  // Save custom leaderboard vehicles to localStorage
+  useEffect(() => {
+    localStorage.setItem('customLeaderboardVehicles', JSON.stringify(customLeaderboardVehicles));
+  }, [customLeaderboardVehicles]);
 
   // --- Formatters ---
   const formatLabel = (str) => {
@@ -860,10 +889,15 @@ export default function EVChargingCalculator() {
 
       // Battery fallback
       if (loadedBattery === 0) {
-          const stmt = db.prepare("SELECT battery_usable_kwh FROM vehicles WHERE id = :id");
-          const result = stmt.getAsObject({':id': selectedVariant});
-          if (result && result.battery_usable_kwh) loadedBattery = result.battery_usable_kwh;
-          stmt.free();
+          try {
+            const stmt = db.prepare("SELECT battery_usable_kwh FROM vehicles WHERE id = :id");
+            const result = stmt.getAsObject({':id': selectedVariant});
+            if (result && result.battery_usable_kwh) loadedBattery = result.battery_usable_kwh;
+            stmt.free();
+          } catch (e) {
+            console.warn('Could not fetch battery_usable_kwh from database:', e.message);
+            // Continue without battery data - will use defaults
+          }
       }
 
       // 2. Fetch Range Scenarios
@@ -1506,22 +1540,6 @@ export default function EVChargingCalculator() {
                 <Zap className="text-blue-600 dark:text-blue-400" fill="currentColor" />
                 A Better DCFC Charging Calculator
               </h1>
-            </div>
-            
-            <div className="relative">
-              <button 
-                onClick={() => setDarkMode(!darkMode)}
-                onMouseEnter={() => setShowTooltip(true)}
-                onMouseLeave={() => setShowTooltip(false)}
-                className="p-2 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-              >
-                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-              </button>
-              {showTooltip && (
-                <div className="absolute top-full right-0 mt-2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded whitespace-nowrap pointer-events-none z-50">
-                  {darkMode ? "Prepare to be blinded!" : "Join the dark side!"}
-                </div>
-              )}
             </div>
           </div>
           

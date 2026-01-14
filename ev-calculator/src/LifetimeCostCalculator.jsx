@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useContext } from 'react';
-import { Fuel, Zap, TrendingDown, Sun, Moon, Info, Battery, Gauge, Wrench, Car, PiggyBank, Plus, Trash2, Calendar, Globe, Leaf, Factory, Cloud, Trees, Flame, ChevronDown, ChevronUp, ExternalLink, Home, Mountain, RefreshCw } from 'lucide-react';
+import { Fuel, Zap, TrendingDown, Sun, Moon, Info, Battery, Gauge, Wrench, Car, PiggyBank, Plus, Trash2, Calendar, Globe, Leaf, Factory, Cloud, Trees, Flame, ChevronDown, ChevronUp, ExternalLink, Home, Mountain, RefreshCw, Activity } from 'lucide-react';
 import { DarkModeContext } from './App';
 
 // --- Conversion Constants ---
@@ -219,7 +219,7 @@ const ChartSegment = ({ width, color, label, tooltipTitle, tooltipValue, onHover
 };
 
 const FuelVsCharge = () => {
-  const { darkMode, setDarkMode } = useContext(DarkModeContext);
+  const { darkMode } = useContext(DarkModeContext);
   const [activeTab, setActiveTab] = useState('operational'); // 'operational' | 'tco' | 'env'
   const [currency, setCurrency] = useState('$');
   const [offsetMetric, setOffsetMetric] = useState('homes'); // 'homes' | 'forest' | 'miles'
@@ -246,39 +246,69 @@ const FuelVsCharge = () => {
   };
 
   // --- State Management ---
-  const [inputs, setInputs] = useState({
-    gasPrice: 3.50,
-    gasPriceUnit: '$/gal',
-    gasEfficiency: 25,
-    gasEfficiencyUnit: 'mpg',
-    gasTank: 15,
-    gasTankUnit: 'gal',
-    gasPurchasePrice: 35000,
-    
-    elecPrice: 0.15, 
-    evRange: 300,
-    evRangeUnit: 'mi',
-    evBattery: 75,
-    evPurchasePrice: 45000,
-    
-    annualDist: 12000,
-    annualDistUnit: 'mi',
-    ownershipYears: 8,
+  const [inputs, setInputs] = useState(() => {
+    const saved = localStorage.getItem('lifetimeCostInputs');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse saved inputs:', e);
+      }
+    }
+    return {
+      gasPrice: 3.50,
+      gasPriceUnit: '$/gal',
+      gasEfficiency: 25,
+      gasEfficiencyUnit: 'mpg',
+      gasTank: 15,
+      gasTankUnit: 'gal',
+      gasPurchasePrice: 35000,
+      
+      elecPrice: 0.15, 
+      evRange: 300,
+      evRangeUnit: 'mi',
+      evBattery: 75,
+      evPurchasePrice: 45000,
+      
+      annualDist: 12000,
+      annualDistUnit: 'mi',
+      ownershipYears: 8,
 
-    // Environmental Defaults
-    gridIntensity: 385, // g CO2/kWh (approx US Avg)
+      // Environmental Defaults
+      gridIntensity: 385, // g CO2/kWh (approx US Avg)
+    };
   });
 
-  const [maintenanceItems, setMaintenanceItems] = useState([
-    { id: 1, name: 'Oil Change', cost: 80, interval: 5000, type: 'gas' },
-    { id: 2, name: 'Tires', cost: 800, interval: 40000, type: 'both' },
-    { id: 3, name: 'Air Filter', cost: 30, interval: 15000, type: 'both' },
-    { id: 4, name: 'Brake Pads', cost: 400, interval: 40000, type: 'gas' },
-    { id: 5, name: 'Brake Pads (Regen)', cost: 400, interval: 80000, type: 'ev' },
-    { id: 6, name: 'Major Service', cost: 800, interval: 60000, type: 'gas' },
-    { id: 7, name: 'Coolant Flush', cost: 250, interval: 50000, type: 'ev' },
-    { id: 8, name: 'Wipers/Fluids', cost: 50, interval: 10000, type: 'both' },
-  ]);
+  // Save inputs to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('lifetimeCostInputs', JSON.stringify(inputs));
+  }, [inputs]);
+
+  const [maintenanceItems, setMaintenanceItems] = useState(() => {
+    const saved = localStorage.getItem('maintenanceItems');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse saved maintenance items:', e);
+      }
+    }
+    return [
+      { id: 1, name: 'Oil Change', cost: 80, interval: 5000, type: 'gas' },
+      { id: 2, name: 'Tires', cost: 800, interval: 40000, type: 'both' },
+      { id: 3, name: 'Air Filter', cost: 30, interval: 15000, type: 'both' },
+      { id: 4, name: 'Brake Pads', cost: 400, interval: 40000, type: 'gas' },
+      { id: 5, name: 'Brake Pads (Regen)', cost: 400, interval: 80000, type: 'ev' },
+      { id: 6, name: 'Major Service', cost: 800, interval: 60000, type: 'gas' },
+      { id: 7, name: 'Coolant Flush', cost: 250, interval: 50000, type: 'ev' },
+      { id: 8, name: 'Wipers/Fluids', cost: 50, interval: 10000, type: 'both' },
+    ];
+  });
+
+  // Save maintenance items to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('maintenanceItems', JSON.stringify(maintenanceItems));
+  }, [maintenanceItems]);
 
   // --- Handlers ---
 
@@ -569,14 +599,6 @@ const FuelVsCharge = () => {
                    <Leaf size={14} className="mr-1"/> Impact
                  </button>
                </div>
-
-               <button
-                onClick={() => setDarkMode(!darkMode)}
-                className="p-3 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-yellow-400 hover:bg-slate-200 dark:hover:bg-slate-600 transition-all"
-                aria-label="Toggle Dark Mode"
-              >
-                {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-              </button>
             </div>
           </header>
 
@@ -584,6 +606,44 @@ const FuelVsCharge = () => {
             
             {/* INPUTS - Left Column (Shared) */}
             <div className="lg:col-span-4 space-y-6">
+              
+              {/* Driving Habits Section - Moved to Top */}
+              <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-blue-100 dark:border-slate-700 relative overflow-hidden">
+                <div className="flex items-center space-x-2 mb-6 relative z-10">
+                  <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                    <Activity size={20} />
+                  </div>
+                  <h2 className="text-xl font-bold text-slate-800 dark:text-white">Driving Habits</h2>
+                </div>
+                <div className="space-y-6 relative z-10">
+                  <SliderControl
+                      label="Annual Distance"
+                      icon={Gauge}
+                      value={inputs.annualDist}
+                      unit={inputs.annualDistUnit}
+                      unitOptions={['mi', 'km']}
+                      currency={currency}
+                      onValueChange={(v) => updateInput('annualDist', v)}
+                      onUnitChange={toggleAnnualDistUnit}
+                      min={1000} 
+                      max={inputs.annualDistUnit === 'mi' ? 35000 : 56000} 
+                      step={500}
+                      colorClass="text-blue-500"
+                    />
+                  {activeTab !== 'operational' && (
+                       <SliderControl
+                          label="Ownership"
+                          icon={Calendar}
+                          value={inputs.ownershipYears}
+                          unit="yrs"
+                          currency={currency}
+                          onValueChange={(v) => updateInput('ownershipYears', v)}
+                          min={1} max={20} step={0.1}
+                          colorClass="text-blue-500"
+                      />
+                    )}
+                </div>
+              </div>
               
               {/* Gas Section */}
               <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-orange-100 dark:border-slate-700 relative overflow-hidden">
@@ -708,37 +768,9 @@ const FuelVsCharge = () => {
                 </div>
               </div>
 
-               {/* Usage Section */}
-               <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
-                <h3 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-4">Driving Habits</h3>
-                <SliderControl
-                    label="Annual Distance"
-                    value={inputs.annualDist}
-                    unit={inputs.annualDistUnit}
-                    unitOptions={['mi', 'km']}
-                    currency={currency}
-                    onValueChange={(v) => updateInput('annualDist', v)}
-                    onUnitChange={toggleAnnualDistUnit}
-                    min={1000} 
-                    max={inputs.annualDistUnit === 'mi' ? 35000 : 56000} 
-                    step={500}
-                    colorClass="text-blue-500"
-                  />
-                {activeTab !== 'operational' && (
-                     <SliderControl
-                        label="Ownership"
-                        icon={Calendar}
-                        value={inputs.ownershipYears}
-                        unit="yrs"
-                        currency={currency}
-                        onValueChange={(v) => updateInput('ownershipYears', v)}
-                        min={1} max={20} step={0.1}
-                        colorClass="text-blue-500"
-                    />
-                  )}
-                {/* Environmental Specific Inputs */}
-                {activeTab === 'env' && (
-                    <div className="mt-8 border-t border-slate-100 dark:border-slate-700 pt-6">
+               {/* Environmental Specific Inputs */}
+               {activeTab === 'env' && (
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
                         <h3 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-4 flex items-center">
                             <Cloud size={14} className="mr-2"/> Power Grid & Lifecycle
                         </h3>
@@ -781,7 +813,6 @@ const FuelVsCharge = () => {
                         />
                     </div>
                 )}
-               </div>
 
             </div>
 
