@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useContext } from 'react';
 import { 
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, ComposedChart, Area, ReferenceLine
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, ComposedChart, Area, ReferenceLine, PieChart as RechartsPieChart, Pie, Cell
 } from 'recharts';
 import { 
-  Calculator, DollarSign, Zap, Activity, Info, TrendingUp, Truck, Settings, Save, RotateCcw, Menu, ChevronLeft, ChevronRight, BarChart2, PieChart, Sun, Moon
+  Calculator, DollarSign, Zap, Activity, Info, TrendingUp, Truck, Settings, Save, RotateCcw, Menu, ChevronLeft, ChevronRight, BarChart2, PieChart, Sun, Moon, Plus, X, ChevronDown, AlertCircle
 } from 'lucide-react';
 import { DarkModeContext } from './App';
 
@@ -23,15 +23,18 @@ import { DarkModeContext } from './App';
 
 // --- Constants & Data ---
 
-const VEHICLE_DATA = [
-  { id: 'tesla_m3', name: 'Tesla Model 3 LR', battery: 82, avgKw: 93, populationShare: 25 },
-  { id: 'vw_id4', name: 'VW ID.4', battery: 77, avgKw: 91, populationShare: 12 },
-  { id: 'mache', name: 'Ford Mach-E LR', battery: 92, avgKw: 85, populationShare: 12 },
-  { id: 'rivian_r1s', name: 'Rivian R1S', battery: 135, avgKw: 124, populationShare: 8 },
-  { id: 'tesla_s', name: 'Tesla Model S LR', battery: 100, avgKw: 129, populationShare: 8 },
-  { id: 'bolt', name: 'Chevy Bolt', battery: 65, avgKw: 44, populationShare: 8 },
-  { id: 'ioniq5', name: 'Hyundai Ioniq 5', battery: 77, avgKw: 197, populationShare: 10 },
-  { id: 'f150', name: 'Ford F-150 Lightning', battery: 131, avgKw: 115, populationShare: 17 },
+const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'];
+
+// Default vehicles for reset
+const DEFAULT_VEHICLES = [
+  { make: 'Tesla', model: 'model_3', variant: 'model_3', populationShare: 25 },
+  { make: 'Volkswagen', model: 'id.4', variant: 'id.4_pro', populationShare: 12 },
+  { make: 'Ford', model: 'mustang_mach-e', variant: 'mustang_mach-e_gt', populationShare: 12 },
+  { make: 'Rivian', model: 'r1', variant: 'r1t_performance_dual-motor_awd_lp', populationShare: 8 },
+  { make: 'Tesla', model: 'model_s', variant: 'model_s_awd', populationShare: 8 },
+  { make: 'Chevrolet', model: 'bolt', variant: 'bolt', populationShare: 8 },
+  { make: 'Hyundai', model: 'ioniq_5', variant: 'Ioniq_5_xrt', populationShare: 17 },
+  { make: 'Mercedes', model: 'eqe', variant: 'eqe_350_4matic', populationShare: 10 },
 ];
 
 const DEFAULT_INPUTS = {
@@ -165,6 +168,14 @@ export default function DCFCCalculator() {
     }
     return DEFAULT_INPUTS;
   });
+  
+  // Database State
+  const [db, setDb] = useState(null);
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [makes, setMakes] = useState([]);
+  
+  // Vehicle Mix State
   const [vehicles, setVehicles] = useState(() => {
     const saved = localStorage.getItem('siteROIVehicles');
     if (saved) {
@@ -174,17 +185,280 @@ export default function DCFCCalculator() {
         console.error('Failed to parse saved Site ROI vehicles:', e);
       }
     }
-    return VEHICLE_DATA;
+    return [];
   });
+  
+  // Vehicle Selection State (for adding new vehicles)
+  const [newVehicle, setNewVehicle] = useState({
+    make: '',
+    model: '',
+    variant: '',
+    models: [],
+    variants: [],
+    populationShare: 0
+  });
+  
+  const [showVehicleMixChart, setShowVehicleMixChart] = useState(false);
+  const [excludeChineseMakes, setExcludeChineseMakes] = useState(true);
   
   // UI State
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('site');
-  const [activeGraphTab, setActiveGraphTab] = useState('financials'); // 'financials' | 'ops'
+  const [activeGraphTab, setActiveGraphTab] = useState('financials'); // 'financials' | 'ops' | 'vehicles'
   const [financialSubTab, setFinancialSubTab] = useState('cashflow'); // 'cashflow' | 'composition'
   const [opsSubTab, setOpsSubTab] = useState('utilization'); // 'utilization' | 'throughput'
 
   const [results, setResults] = useState(null);
+
+  // --- Database Initialization ---
+  useEffect(() => {
+    const loadDatabase = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch('/ev_data.db');
+        if (!response.ok) throw new Error(`Database file not found (${response.status}).`);
+        const arrayBuffer = await response.arrayBuffer();
+        const uInt8Array = new Uint8Array(arrayBuffer);
+        const SQL = await window.initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` });
+        const newDb = new SQL.Database(uInt8Array);
+        setDb(newDb);
+        
+        const res = newDb.exec("SELECT DISTINCT make FROM vehicles ORDER BY make COLLATE NOCASE ASC");
+        if (res.length > 0) {
+          let makesList = res[0].values.map(v => v[0].trim()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+          setMakes(makesList);
+        }
+        
+        setError(null);
+      } catch (err) {
+        console.error(err);
+        setError(err.message || "Failed to load vehicle database.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadDatabase();
+  }, []);
+
+  // Filter makes based on Chinese exclusion setting
+  useEffect(() => {
+    if (!db) return;
+    
+    let query = "SELECT DISTINCT make FROM vehicles";
+    if (excludeChineseMakes) {
+      query += " WHERE country != 'CN'";
+    }
+    query += " ORDER BY make COLLATE NOCASE ASC";
+    
+    const res = db.exec(query);
+    if (res.length > 0) {
+      const makesList = res[0].values.map(v => v[0].trim()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      setMakes(makesList);
+    }
+  }, [db, excludeChineseMakes]);
+
+  // Update models when make is selected
+  useEffect(() => {
+    if (!db || !newVehicle.make) {
+      setNewVehicle(prev => ({ ...prev, models: [], model: '', variants: [], variant: '' }));
+      return;
+    }
+    try {
+      const res = db.exec(`SELECT DISTINCT model FROM vehicles WHERE make = ? ORDER BY model ASC`, [newVehicle.make]);
+      if (res.length > 0) {
+        const modelsList = res[0].values.map(v => v[0]);
+        setNewVehicle(prev => ({ ...prev, models: modelsList, model: '', variants: [], variant: '' }));
+      }
+    } catch (err) {
+      console.error('Error fetching models:', err);
+    }
+  }, [db, newVehicle.make]);
+
+  // Update variants when model is selected
+  useEffect(() => {
+    if (!db || !newVehicle.model) {
+      setNewVehicle(prev => ({ ...prev, variants: [], variant: '' }));
+      return;
+    }
+    try {
+      const res = db.exec(`SELECT id, variant FROM vehicles WHERE make = ? AND model = ? ORDER BY variant ASC`, [newVehicle.make, newVehicle.model]);
+      if (res.length > 0) {
+        const variantsList = res[0].values.map(v => ({ id: v[0], name: v[1] }));
+        setNewVehicle(prev => ({ ...prev, variants: variantsList, variant: '' }));
+      }
+    } catch (err) {
+      console.error('Error fetching variants:', err);
+    }
+  }, [db, newVehicle.model]);
+
+  // Calculate vehicle metrics from charging curve
+  const calculateVehicleMetrics = (variantId, startSoc, endSoc, derating) => {
+    if (!db || !variantId) {
+      console.warn('Database or variant ID missing');
+      return { battery: 0, avgKw: 0 };
+    }
+    
+    try {
+      // Get battery capacity
+      const batteryRes = db.exec(`SELECT battery_net_kwh FROM vehicles WHERE id = ?`, [variantId]);
+      if (batteryRes.length === 0 || !batteryRes[0].values[0]) {
+        console.error(`No battery data found for vehicle ID: ${variantId}`);
+        return { battery: 0, avgKw: 0 };
+      }
+      const battery = batteryRes[0].values[0][0];
+      
+      // Get charging curve
+      const curveRes = db.exec(`SELECT soc_percent, power_kw FROM charging_curve WHERE vehicle_id = ? ORDER BY soc_percent ASC`, [variantId]);
+      if (curveRes.length === 0) {
+        console.error(`No charging curve found for vehicle ID: ${variantId}`);
+        return { battery, avgKw: 0 };
+      }
+      
+      const curveData = curveRes[0].values.map(v => ({ soc: v[0], kw: v[1] }));
+      
+      // Calculate average power between startSoc and endSoc
+      const relevantPoints = curveData.filter(p => p.soc >= startSoc && p.soc <= endSoc);
+      if (relevantPoints.length === 0) {
+        console.warn(`No curve points found between ${startSoc}% and ${endSoc}% for vehicle ID: ${variantId}`);
+        // If no points in range, try to interpolate or use nearest
+        const allPoints = curveData.filter(p => p.soc >= 0);
+        if (allPoints.length > 0) {
+          const avgKw = allPoints.reduce((sum, p) => sum + p.kw, 0) / allPoints.length;
+          return { battery, avgKw: avgKw * derating };
+        }
+        return { battery, avgKw: 0 };
+      }
+      
+      const avgKw = relevantPoints.reduce((sum, p) => sum + p.kw, 0) / relevantPoints.length;
+      
+      console.log(`Vehicle ${variantId}: battery=${battery}kWh, avgKw=${avgKw.toFixed(1)}kW (${relevantPoints.length} curve points)`);
+      
+      return { battery, avgKw: avgKw * derating };
+    } catch (err) {
+      console.error('Error calculating vehicle metrics:', err);
+      return { battery: 0, avgKw: 0 };
+    }
+  };
+
+  // Format label helper
+  const formatLabel = (str) => {
+    if (!str) return '';
+    return str.toString()
+      .replace(/_/g, ' ')
+      .split(' ')
+      .map(word => {
+        // Capitalize entire word if it's less than 3 characters
+        if (word.length < 4) return word.toUpperCase();
+        // Otherwise just capitalize first letter
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      })
+      .join(' ');
+  };
+
+  // Vehicle Management Functions
+  const addVehicle = () => {
+    if (!newVehicle.variant || newVehicle.populationShare <= 0) return;
+    
+    try {
+      const res = db.exec(`SELECT make, model, variant FROM vehicles WHERE id = ?`, [newVehicle.variant]);
+      if (res.length === 0) return;
+      
+      const [make, model, variant] = res[0].values[0];
+      const metrics = calculateVehicleMetrics(newVehicle.variant, inputs.avgStartSoC, inputs.avgEndSoC, inputs.performanceDerating);
+      
+      const newVehicleData = {
+        id: newVehicle.variant,
+        name: `${formatLabel(make)} ${formatLabel(model)} ${formatLabel(variant)}`,
+        battery: metrics.battery,
+        avgKw: metrics.avgKw,
+        populationShare: newVehicle.populationShare,
+        variantId: newVehicle.variant
+      };
+      
+      setVehicles(prev => [...prev, newVehicleData]);
+      
+      // Reset form
+      setNewVehicle({
+        make: '',
+        model: '',
+        variant: '',
+        models: [],
+        variants: [],
+        populationShare: 0
+      });
+    } catch (err) {
+      console.error('Error adding vehicle:', err);
+    }
+  };
+
+  const removeVehicle = (id) => {
+    setVehicles(prev => prev.filter(v => v.id !== id));
+  };
+
+  const resetToDefaults = async () => {
+    if (!db) return;
+    
+    try {
+      const newVehiclesList = [];
+      
+      for (const defaultVeh of DEFAULT_VEHICLES) {
+        // Find the variant ID from database
+        const res = db.exec(
+          `SELECT id, make, model, variant FROM vehicles WHERE make = ? AND model = ? AND variant = ? COLLATE NOCASE`,
+          [defaultVeh.make, defaultVeh.model, defaultVeh.variant]
+        );
+        
+        if (res.length > 0 && res[0].values.length > 0) {
+          const [id, make, model, variant] = res[0].values[0];
+          const metrics = calculateVehicleMetrics(id, inputs.avgStartSoC, inputs.avgEndSoC, inputs.performanceDerating);
+          
+          newVehiclesList.push({
+            id: id,
+            name: `${formatLabel(make)} ${formatLabel(model)} ${formatLabel(variant)}`,
+            battery: metrics.battery,
+            avgKw: metrics.avgKw,
+            populationShare: defaultVeh.populationShare,
+            variantId: id
+          });
+        }
+      }
+      
+      setVehicles(newVehiclesList);
+      setInputs(DEFAULT_INPUTS);
+    } catch (err) {
+      console.error('Error resetting to defaults:', err);
+    }
+  };
+
+  const handleVehicleChange = (id, field, value) => {
+    setVehicles(prev => prev.map(v => {
+      if (v.id === id) {
+        if (field === 'populationShare') {
+          return { ...v, [field]: value };
+        }
+        return { ...v, [field]: value };
+      }
+      return v;
+    }));
+  };
+
+  // Recalculate vehicle metrics when SoC or derating changes
+  useEffect(() => {
+    if (!db || vehicles.length === 0) return;
+    
+    const updatedVehicles = vehicles.map(v => {
+      if (!v.variantId) return v;
+      const metrics = calculateVehicleMetrics(v.variantId, inputs.avgStartSoC, inputs.avgEndSoC, inputs.performanceDerating);
+      return { ...v, battery: metrics.battery, avgKw: metrics.avgKw };
+    });
+    
+    setVehicles(updatedVehicles);
+  }, [inputs.avgStartSoC, inputs.avgEndSoC, inputs.performanceDerating]);
+
+  // Calculate total vehicle mix percentage
+  const totalVehicleMix = useMemo(() => {
+    return vehicles.reduce((sum, v) => sum + (v.populationShare || 0), 0);
+  }, [vehicles]);
 
   // Save inputs to localStorage
   useEffect(() => {
@@ -205,10 +479,6 @@ export default function DCFCCalculator() {
     const newArr = [...inputs.customYearlyUtilization];
     newArr[index] = value;
     setInputs(prev => ({ ...prev, customYearlyUtilization: newArr }));
-  };
-
-  const handleVehicleChange = (id, field, value) => {
-    setVehicles(prev => prev.map(v => v.id === id ? { ...v, [field]: value } : v));
   };
 
   // --- Calculation Engine ---
@@ -265,9 +535,24 @@ export default function DCFCCalculator() {
     let weightedKWh = 0;
     let weightedDuration = 0;
 
+    // Validate vehicles array exists and has data
+    if (!vehicles || vehicles.length === 0) {
+      console.warn('No vehicles configured. Using default values.');
+      // Use default fallback values if no vehicles
+      setResults(null);
+      return;
+    }
+
     vehicles.forEach(v => {
-      totalPop += v.populationShare;
+      totalPop += v.populationShare || 0;
     });
+
+    // Check if total population is valid
+    if (totalPop === 0) {
+      console.warn('Total vehicle population share is 0. Please add vehicles with population share.');
+      setResults(null);
+      return;
+    }
 
     vehicles.forEach(v => {
       const share = v.populationShare / totalPop;
@@ -275,11 +560,25 @@ export default function DCFCCalculator() {
       const energyDelivered = v.battery * ((avgEndSoC - avgStartSoC) / 100);
       // Real Duration = Energy / (AvgKW * Derating)
       const avgPowerReal = v.avgKw * performanceDerating;
+      
+      // Prevent division by zero
+      if (avgPowerReal === 0 || energyDelivered === 0) {
+        console.warn(`Invalid vehicle data for ${v.name}: avgKw=${v.avgKw}, battery=${v.battery}`);
+        return;
+      }
+      
       const durationHours = energyDelivered / avgPowerReal;
       
       weightedKWh += energyDelivered * share;
       weightedDuration += durationHours * share;
     });
+
+    // Validate calculated values
+    if (!isFinite(weightedKWh) || !isFinite(weightedDuration) || weightedDuration === 0) {
+      console.warn('Invalid calculated vehicle metrics. Please check vehicle configuration.');
+      setResults(null);
+      return;
+    }
 
     const avgSessionKWh = weightedKWh;
     const avgSessionHours = weightedDuration; // 30-45 mins usually
@@ -433,10 +732,10 @@ export default function DCFCCalculator() {
             </div>
             <div className="flex gap-2">
                <button 
-                 onClick={() => setInputs(DEFAULT_INPUTS)}
+                 onClick={resetToDefaults}
                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-700 transition-colors text-slate-700 dark:text-slate-300"
                >
-                 <RotateCcw className="w-4 h-4" /> <span className="hidden sm:inline">Reset</span>
+                 <RotateCcw className="w-4 h-4" /> <span className="hidden sm:inline">Reset to Defaults</span>
                </button>
             </div>
           </div>
@@ -497,21 +796,154 @@ export default function DCFCCalculator() {
                   <InputField label="Avg End SoC" value={inputs.avgEndSoC} onChange={(v) => handleInputChange('avgEndSoC', v)} suffix="%" />
                   <InputField label="Perf. Derating" value={inputs.performanceDerating} onChange={(v) => handleInputChange('performanceDerating', v)} step="0.05" tooltip="Real world factor (cold weather, curve taper). 1.0 = Ideal."/>
                   
+                  {/* Vehicle Mix Section */}
                   <div className="mt-4">
-                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-2">Vehicle Mix (%)</label>
-                    <div className="space-y-2">
-                      {vehicles.map(v => (
-                        <div key={v.id} className="flex justify-between items-center text-xs">
-                          <span className="text-slate-600 dark:text-slate-400 truncate w-32">{v.name}</span>
+                    <div className="flex justify-between items-center mb-2">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Vehicle Mix</label>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-medium ${totalVehicleMix === 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {totalVehicleMix.toFixed(0)}%
+                        </span>
+                        <button
+                          onClick={() => setShowVehicleMixChart(!showVehicleMixChart)}
+                          className="p-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                          title="View Mix Chart"
+                        >
+                          <PieChart size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {totalVehicleMix !== 100 && (
+                      <div className="mb-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                        <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                        <span>Total must equal 100%</span>
+                      </div>
+                    )}
+                    
+                    {/* Existing Vehicles */}
+                    <div className="space-y-2 mb-3">
+                      {vehicles.map((v, idx) => (
+                        <div key={v.id} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-700/50 p-2 rounded-lg text-xs">
+                          <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }}></div>
+                          <span className="text-slate-700 dark:text-slate-300 truncate flex-1 text-[10px]">{v.name}</span>
                           <input 
                             type="number" 
-                            className="w-16 border rounded px-1 py-0.5 text-right"
+                            className="w-14 border border-slate-300 dark:border-slate-600 rounded px-1 py-0.5 text-right bg-white dark:bg-slate-800"
                             value={v.populationShare}
-                            onChange={(e) => handleVehicleChange(v.id, 'populationShare', parseFloat(e.target.value))}
+                            onChange={(e) => handleVehicleChange(v.id, 'populationShare', parseFloat(e.target.value) || 0)}
+                            step="1"
+                            min="0"
+                            max="100"
                           />
+                          <span className="text-slate-400">%</span>
+                          <button
+                            onClick={() => removeVehicle(v.id)}
+                            className="p-0.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                            title="Remove"
+                          >
+                            <X size={12} />
+                          </button>
                         </div>
                       ))}
                     </div>
+                    
+                    {/* Add Vehicle Form */}
+                    {!isLoading && !error && db && (
+                      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg space-y-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase">Add Vehicle</label>
+                          <label className="flex items-center gap-1.5 text-[9px] text-blue-700 dark:text-blue-300 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={excludeChineseMakes}
+                              onChange={(e) => setExcludeChineseMakes(e.target.checked)}
+                              className="w-3 h-3 rounded border-blue-300 dark:border-blue-700 text-blue-600 focus:ring-1 focus:ring-blue-500 dark:bg-slate-800"
+                            />
+                            Exclude Chinese Makes
+                          </label>
+                        </div>
+                        
+                        <div>
+                          <select 
+                            value={newVehicle.make} 
+                            onChange={(e) => setNewVehicle(prev => ({ ...prev, make: e.target.value }))}
+                            className="w-full py-1 px-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded"
+                          >
+                            <option value="">Select Make...</option>
+                            {makes.map(m => <option key={m} value={m}>{formatLabel(m)}</option>)}
+                          </select>
+                        </div>
+                        
+                        {newVehicle.models.length > 0 && (
+                          <div>
+                            <select 
+                              value={newVehicle.model} 
+                              onChange={(e) => setNewVehicle(prev => ({ ...prev, model: e.target.value }))}
+                              className="w-full py-1 px-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded"
+                            >
+                              <option value="">Select Model...</option>
+                              {newVehicle.models.map(m => <option key={m} value={m}>{formatLabel(m)}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        
+                        {newVehicle.variants.length > 0 && (
+                          <div>
+                            <select 
+                              value={newVehicle.variant} 
+                              onChange={(e) => setNewVehicle(prev => ({ ...prev, variant: e.target.value }))}
+                              className="w-full py-1 px-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded"
+                            >
+                              <option value="">Select Variant...</option>
+                              {newVehicle.variants.map(v => <option key={v.id} value={v.id}>{formatLabel(v.name)}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        
+                        {newVehicle.variant && (
+                          <div className="space-y-2">
+                            <div>
+                              <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1">
+                                Population Share: <span className="font-medium text-slate-900 dark:text-slate-100">{newVehicle.populationShare}%</span>
+                              </label>
+                              <input 
+                                type="range" 
+                                value={newVehicle.populationShare}
+                                onChange={(e) => setNewVehicle(prev => ({ ...prev, populationShare: parseFloat(e.target.value) || 0 }))}
+                                className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                min="0"
+                                max={100 - totalVehicleMix}
+                                step="1"
+                              />
+                              <div className="flex justify-between text-[9px] text-slate-500 dark:text-slate-500 mt-0.5">
+                                <span>0%</span>
+                                <span>{100 - totalVehicleMix}%</span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={addVehicle}
+                              disabled={!newVehicle.variant || newVehicle.populationShare <= 0}
+                              className="w-full px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-600 text-white text-xs rounded transition-colors flex items-center justify-center gap-1 disabled:cursor-not-allowed"
+                            >
+                              <Plus size={12} /> Add Vehicle
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {isLoading && (
+                      <div className="text-xs text-slate-500 dark:text-slate-400 italic text-center py-2">
+                        Loading database...
+                      </div>
+                    )}
+                    
+                    {error && (
+                      <div className="text-xs text-red-600 dark:text-red-400 text-center py-2">
+                        {error}
+                      </div>
+                    )}
                   </div>
                 </section>
               </>
@@ -618,6 +1050,30 @@ export default function DCFCCalculator() {
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50 dark:bg-slate-950 w-full">
           
+          {!results && (
+            <div className="max-w-6xl mx-auto">
+              <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
+                <Truck className="w-16 h-16 text-slate-300 dark:text-slate-600 mb-4" />
+                <h3 className="text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  No Vehicle Mix Configured
+                </h3>
+                <p className="text-slate-500 dark:text-slate-400 max-w-md mb-4">
+                  Add at least one vehicle to the Vehicle Mix in the Site Parameters tab to see financial projections and ROI analysis.
+                </p>
+                <div className="flex flex-col gap-2 text-sm text-slate-600 dark:text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Total vehicle mix must equal 100%</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Each vehicle will use charging curve data from the database</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {results && (
             <div className="max-w-6xl mx-auto space-y-6">
               
@@ -678,6 +1134,17 @@ export default function DCFCCalculator() {
                     >
                       <Activity className="w-4 h-4" />
                       Operational Metrics
+                    </button>
+                    <button
+                      onClick={() => setActiveGraphTab('vehicles')}
+                      className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${
+                        activeGraphTab === 'vehicles'
+                          ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                          : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
+                      }`}
+                    >
+                      <PieChart className="w-4 h-4" />
+                      Vehicle Mix
                     </button>
                   </nav>
                 </div>
@@ -800,6 +1267,68 @@ export default function DCFCCalculator() {
                             </ResponsiveContainer>
                          )}
                       </div>
+                    </div>
+                  )}
+
+                  {activeGraphTab === 'vehicles' && (
+                    <div className="flex flex-col items-center justify-center min-h-[500px]">
+                      {vehicles.length === 0 ? (
+                        <div className="text-center text-slate-500 dark:text-slate-400">
+                          <PieChart className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                          <p className="text-sm font-medium">No vehicles added yet</p>
+                          <p className="text-xs mt-2">Add vehicles in the Site Parameters tab to see the mix visualization</p>
+                        </div>
+                      ) : (
+                        <>
+                          <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-6">Vehicle Mix Distribution</h3>
+                          <ResponsiveContainer width="100%" height={400}>
+                            <RechartsPieChart>
+                              <Pie
+                                data={vehicles.map((v, idx) => ({
+                                  name: v.name,
+                                  value: v.populationShare,
+                                  battery: v.battery,
+                                  avgKw: v.avgKw
+                                }))}
+                                cx="50%"
+                                cy="50%"
+                                labelLine={false}
+                                label={(entry) => `${entry.name}: ${entry.value}%`}
+                                outerRadius={120}
+                                fill="#8884d8"
+                                dataKey="value"
+                              >
+                                {vehicles.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <RechartsTooltip 
+                                formatter={(value, name, props) => [
+                                  `${value}% (${props.payload.battery}kWh, Avg: ${props.payload.avgKw.toFixed(1)}kW)`,
+                                  name
+                                ]}
+                                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                              />
+                            </RechartsPieChart>
+                          </ResponsiveContainer>
+                          
+                          {/* Vehicle Mix Summary */}
+                          <div className="mt-6 w-full max-w-2xl">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg">
+                                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Total Vehicles</div>
+                                <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">{vehicles.length}</div>
+                              </div>
+                              <div className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg">
+                                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Total Mix</div>
+                                <div className={`text-2xl font-bold ${totalVehicleMix === 100 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                  {totalVehicleMix.toFixed(0)}%
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
