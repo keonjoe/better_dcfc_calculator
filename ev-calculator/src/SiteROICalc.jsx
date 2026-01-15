@@ -225,7 +225,6 @@ export default function DCFCCalculator() {
   const [excludeChineseMakes, setExcludeChineseMakes] = useState(true);
   
   // UI State
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('site');
   const [activeGraphTab, setActiveGraphTab] = useState('financials'); // 'financials' | 'ops' | 'vehicles'
   const [financialSubTab, setFinancialSubTab] = useState('cashflow'); // 'cashflow' | 'composition'
@@ -282,7 +281,8 @@ export default function DCFCCalculator() {
 
   // Load default vehicles when database is ready and it's first visit
   useEffect(() => {
-    if (db && shouldLoadDefaults && vehicles.length === 0) {
+    if (db && shouldLoadDefaults) {
+      console.log('Loading default vehicle mix...');
       loadDefaultVehicleMix();
       setShouldLoadDefaults(false);
       sessionStorage.setItem('siteROIInitialized', 'true');
@@ -795,67 +795,58 @@ export default function DCFCCalculator() {
   const formatNumber = (val) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(val);
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans overflow-hidden transition-colors duration-200">
-      {/* Header */}
-      <header className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 p-4 md:p-6 z-20">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex justify-between items-center mb-4">
-            <div className="flex items-center gap-3">
-
-              <div>
-                <h1 className="text-2xl font-bold flex items-center gap-2">
-                  <BarChart2 className="text-blue-600 dark:text-blue-400" />
-                  DCFC Site ROI Calculator
-                </h1>
-              </div>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-2 sm:p-4 md:p-6 transition-colors duration-200 overflow-x-hidden">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-4 sm:mb-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+                <BarChart2 className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+                DCFC Site ROI Calculator
+              </h1>
             </div>
-            <div className="flex gap-2">
-               <button 
-                 onClick={resetToDefaults}
-                 className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-700 transition-colors text-slate-700 dark:text-slate-300"
-               >
-                 <RotateCcw className="w-4 h-4" /> <span className="hidden sm:inline">Reset to Defaults</span>
-               </button>
-            </div>
+            <button 
+              onClick={resetToDefaults}
+              className="flex items-center gap-2 px-3 py-2 text-xs sm:text-sm font-medium bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-700 transition-colors text-slate-700 dark:text-slate-300"
+            >
+              <RotateCcw className="w-3 h-3 sm:w-4 sm:h-4" /> 
+              <span>Reset to Defaults</span>
+            </button>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm flex items-center gap-2">
-              <Activity size={16} />
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <div className="px-3 py-2 text-xs sm:text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm flex items-center gap-2 whitespace-nowrap">
+              <Activity size={14} className="sm:w-4 sm:h-4" />
               {inputs.siteName}
             </div>
           </div>
         </div>
-      </header>
 
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Sidebar Inputs */}
-        <aside 
-            className={`
-                bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 overflow-y-auto shadow-md z-10 flex flex-col transition-all duration-300 ease-in-out absolute md:relative h-full
-                ${isSidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full md:translate-x-0 md:w-0'}
-            `}
-        >
-          <div className="p-4 border-b border-slate-100 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10 min-w-[320px]">
-             <div className="flex justify-between items-center mb-3">
-                 <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">Configuration</h2>
-                 <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors" title={isSidebarOpen ? "Close sidebar" : "Open sidebar"}>
-                   {isSidebarOpen ? <ChevronLeft className="w-5 h-5"/> : <ChevronRight className="w-5 h-5"/>}
-                 </button>
-             </div>
-             <div className="flex gap-1 bg-slate-100 dark:bg-slate-900/50 p-1 rounded-lg">
-               {['site', 'costs', 'ops'].map(tab => (
-                 <button
-                   key={tab}
-                   onClick={() => setActiveTab(tab)}
-                   className={`flex-1 py-1.5 text-xs font-semibold rounded-md capitalize transition-all ${activeTab === tab ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                 >
-                   {tab}
-                 </button>
-               ))}
-             </div>
-          </div>
+        {/* Main Layout - Two Column on Desktop */}
+        <div className="flex flex-col lg:flex-row gap-4 sm:gap-6">
+          
+          {/* Left Column - Configuration Inputs */}
+          <div className="w-full lg:w-80 xl:w-96 flex-shrink-0 space-y-4">
+            {/* Configuration Tabs */}
+            <div className="flex gap-1 sm:gap-2 bg-white dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 overflow-x-auto">
+              {['site', 'costs', 'ops'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 py-2 px-2 sm:px-3 text-xs sm:text-sm font-semibold rounded-md capitalize transition-all whitespace-nowrap ${activeTab === tab ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                >
+                  {tab === 'site' && <Settings className="inline w-3 h-3 sm:w-4 sm:h-4 mr-1" />}
+                  {tab === 'costs' && <DollarSign className="inline w-3 h-3 sm:w-4 sm:h-4 mr-1" />}
+                  {tab === 'ops' && <TrendingUp className="inline w-3 h-3 sm:w-4 sm:h-4 mr-1" />}
+                  {tab}
+                </button>
+              ))}
+            </div>
 
-          <div className="p-4 space-y-6 pb-20 min-w-[320px]">
+            {/* Configuration Sections */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-3 sm:p-4 md:p-6">
+              <div className="space-y-6">
+
             {activeTab === 'site' && (
               <>
                 <section>
@@ -1111,60 +1102,48 @@ export default function DCFCCalculator() {
                 </section>
               </>
             )}
+              </div>
+            </div>
           </div>
-        </aside>
 
-        {/* Floating Toggle Button (shown when sidebar is hidden) */}
-        {!isSidebarOpen && (
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            className="fixed top-24 left-4 z-30 p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-lg transition-all duration-200 flex items-center gap-2"
-            title="Show Configuration"
-          >
-            <ChevronRight className="w-5 h-5" />
-            <span className="hidden sm:inline text-sm font-medium">Show Inputs</span>
-          </button>
-        )}
-
-        {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50 dark:bg-slate-950 w-full">
-          
-          {!results && (
-            <div className="max-w-6xl mx-auto">
-              <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
-                <Truck className="w-16 h-16 text-slate-300 dark:text-slate-600 mb-4" />
-                <h3 className="text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2">
+          {/* Right Column - Results/Graphs */}
+          <div className="flex-1 min-w-0">
+            {!results && (
+            <div className="mt-0 lg:mt-6">
+              <div className="flex flex-col items-center justify-center min-h-[300px] sm:min-h-[400px] text-center bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
+                <Truck className="w-12 h-12 sm:w-16 sm:h-16 text-slate-300 dark:text-slate-600 mb-4" />
+                <h3 className="text-lg sm:text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2">
                   No Vehicle Mix Configured
                 </h3>
-                <p className="text-slate-500 dark:text-slate-400 max-w-md mb-4">
+                <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-md mb-4 px-4">
                   Add at least one vehicle to the Vehicle Mix in the Site Parameters tab to see financial projections and ROI analysis.
                 </p>
                 <button
                   onClick={loadDefaultVehicleMix}
-                  className="mb-4 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-md transition-all duration-200 flex items-center gap-2 mx-auto"
+                  className="mb-4 px-4 sm:px-6 py-2 sm:py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-md transition-all duration-200 flex items-center gap-2 mx-auto text-sm sm:text-base"
                 >
-                  <Truck className="w-5 h-5" />
+                  <Truck className="w-4 h-4 sm:w-5 sm:h-5" />
                   Use Default Vehicle Mix
                 </button>
-                <div className="flex flex-col gap-2 text-sm text-slate-600 dark:text-slate-400">
+                <div className="flex flex-col gap-2 text-xs sm:text-sm text-slate-600 dark:text-slate-400">
                   <div className="flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4" />
+                    <AlertCircle className="w-3 h-3 sm:w-4 sm:h-4" />
                     <span>Total vehicle mix must equal 100%</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4" />
+                    <AlertCircle className="w-3 h-3 sm:w-4 sm:h-4" />
                     <span>Each vehicle will use charging curve data from the database</span>
                   </div>
                 </div>
               </div>
             </div>
           )}
-          
+              
           {results && (
-            <div className="max-w-6xl mx-auto space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               
               {/* Top KPI Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <MetricCard 
                   icon={TrendingUp}
                   label="Net Present Value (NPV)" 
@@ -1236,21 +1215,21 @@ export default function DCFCCalculator() {
                 </div>
 
                 {/* Graph Content Area */}
-                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <div className="bg-white dark:bg-slate-800 p-3 sm:p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
                   
                   {activeGraphTab === 'financials' && (
-                    <div className="flex flex-col h-[500px]">
+                    <div className="flex flex-col h-[300px] sm:h-[400px] md:h-[500px]">
                       {/* Sub-Tabs */}
-                      <div className="flex gap-2 mb-6">
+                      <div className="flex gap-1 sm:gap-2 mb-4 sm:mb-6 overflow-x-auto">
                          <button 
                             onClick={() => setFinancialSubTab('cashflow')}
-                            className={`px-3 py-1 text-xs font-semibold rounded-full border transition-colors ${financialSubTab === 'cashflow' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-700' : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'}`}
+                            className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-semibold rounded-full border transition-colors whitespace-nowrap ${financialSubTab === 'cashflow' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-700' : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'}`}
                          >
                             Cumulative Cash Flow
                          </button>
                          <button 
                             onClick={() => setFinancialSubTab('composition')}
-                            className={`px-3 py-1 text-xs font-semibold rounded-full border transition-colors ${financialSubTab === 'composition' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-700' : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'}`}
+                            className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-semibold rounded-full border transition-colors whitespace-nowrap ${financialSubTab === 'composition' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-700' : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'}`}
                          >
                             Operating Composition
                          </button>
@@ -1301,9 +1280,9 @@ export default function DCFCCalculator() {
                   )}
 
                   {activeGraphTab === 'ops' && (
-                    <div className="flex flex-col h-[500px]">
+                    <div className="flex flex-col h-[300px] sm:h-[400px] md:h-[500px]">
                       {/* Sub-Tabs */}
-                      <div className="flex gap-2 mb-6">
+                      <div className="flex gap-1 sm:gap-2 mb-4 sm:mb-6 overflow-x-auto">
                          <button 
                             onClick={() => setOpsSubTab('utilization')}
                             className={`px-3 py-1 text-xs font-semibold rounded-full border transition-colors ${opsSubTab === 'utilization' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-700' : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'}`}
@@ -1423,39 +1402,39 @@ export default function DCFCCalculator() {
 
               {/* Data Table */}
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                <div className="p-3 sm:p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
                   <div>
-                    <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Pro Forma Statement</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Detailed annual breakdown</p>
+                    <h3 className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100">Pro Forma Statement</h3>
+                    <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">Detailed annual breakdown</p>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
+                  <table className="w-full text-xs sm:text-sm text-left">
                     <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 font-medium border-b border-slate-200 dark:border-slate-700">
                       <tr>
-                        <th className="px-6 py-3">Year</th>
-                        <th className="px-6 py-3">Util %</th>
-                        <th className="px-6 py-3">Sessions</th>
-                        <th className="px-6 py-3">Energy (MWh)</th>
-                        <th className="px-6 py-3 text-right">Revenue</th>
-                        <th className="px-6 py-3 text-right text-red-600 dark:text-red-400">Utility Cost</th>
-                        <th className="px-6 py-3 text-right text-red-600 dark:text-red-400">Total OpEx</th>
-                        <th className="px-6 py-3 text-right font-bold">EBITDA</th>
-                        <th className="px-6 py-3 text-right font-bold text-blue-600 dark:text-blue-400">Free Cash Flow</th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3">Year</th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3">Util %</th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 hidden sm:table-cell">Sessions</th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 hidden md:table-cell">Energy (MWh)</th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-right">Revenue</th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-right text-red-600 dark:text-red-400 hidden lg:table-cell">Utility Cost</th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-right text-red-600 dark:text-red-400 hidden lg:table-cell">Total OpEx</th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-right font-bold hidden md:table-cell">EBITDA</th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-right font-bold text-blue-600 dark:text-blue-400">Free CF</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                       {results.yearlyData.map((row) => (
                         <tr key={row.year} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                          <td className="px-6 py-3 font-medium text-slate-900 dark:text-slate-100">{row.year}</td>
-                          <td className="px-6 py-3">{formatNumber(row.utilization)}%</td>
-                          <td className="px-6 py-3">{row.sessions.toLocaleString()}</td>
-                          <td className="px-6 py-3">{row.energy.toLocaleString()}</td>
-                          <td className="px-6 py-3 text-right">{formatCurrency(row.revenue)}</td>
-                          <td className="px-6 py-3 text-right text-red-500 dark:text-red-400">({formatCurrency(row.utilityCost)})</td>
-                          <td className="px-6 py-3 text-right text-red-500 dark:text-red-400">({formatCurrency(row.opex)})</td>
-                          <td className="px-6 py-3 text-right font-medium">{formatCurrency(row.ebitda)}</td>
-                          <td className="px-6 py-3 text-right font-bold text-blue-600 dark:text-blue-400">{formatCurrency(row.cashFlow)}</td>
+                          <td className="px-3 sm:px-6 py-2 sm:py-3 font-medium text-slate-900 dark:text-slate-100">{row.year}</td>
+                          <td className="px-3 sm:px-6 py-2 sm:py-3">{formatNumber(row.utilization)}%</td>
+                          <td className="px-3 sm:px-6 py-2 sm:py-3 hidden sm:table-cell">{row.sessions.toLocaleString()}</td>
+                          <td className="px-3 sm:px-6 py-2 sm:py-3 hidden md:table-cell">{row.energy.toLocaleString()}</td>
+                          <td className="px-3 sm:px-6 py-2 sm:py-3 text-right">{formatCurrency(row.revenue)}</td>
+                          <td className="px-3 sm:px-6 py-2 sm:py-3 text-right text-red-500 dark:text-red-400 hidden lg:table-cell">({formatCurrency(row.utilityCost)})</td>
+                          <td className="px-3 sm:px-6 py-2 sm:py-3 text-right text-red-500 dark:text-red-400 hidden lg:table-cell">({formatCurrency(row.opex)})</td>
+                          <td className="px-3 sm:px-6 py-2 sm:py-3 text-right font-medium hidden md:table-cell">{formatCurrency(row.ebitda)}</td>
+                          <td className="px-3 sm:px-6 py-2 sm:py-3 text-right font-bold text-blue-600 dark:text-blue-400">{formatCurrency(row.cashFlow)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1463,8 +1442,8 @@ export default function DCFCCalculator() {
                 </div>
               </div>
 
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 p-4 rounded-lg text-sm text-blue-800 dark:text-blue-300 flex items-start gap-3">
-                <Info className="w-5 h-5 shrink-0 mt-0.5" />
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 p-3 sm:p-4 rounded-lg text-xs sm:text-sm text-blue-800 dark:text-blue-300 flex items-start gap-2 sm:gap-3">
+                <Info className="w-4 h-4 sm:w-5 sm:h-5 shrink-0 mt-0.5" />
                 <div>
                    <strong>Note on Logic:</strong> This model assumes a weighted average of vehicle types (Tesla M3, ID.4, Mach-E, etc.) to calculate session energy and duration. Demand charges are estimated using a Dynamic Coincidence Factor which scales linearly from 10% base to 100% at {inputs.peakDemandUtilThreshold}% utilization.
                 </div>
@@ -1472,7 +1451,8 @@ export default function DCFCCalculator() {
 
             </div>
           )}
-        </main>
+          </div>
+        </div>
       </div>
     </div>
   );

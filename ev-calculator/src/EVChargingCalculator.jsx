@@ -1555,7 +1555,7 @@ export default function EVChargingCalculator() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-4 md:p-6 transition-colors duration-200">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-4 md:p-6 transition-colors duration-200 overflow-x-hidden">
       
       <div className="max-w-6xl mx-auto">
         {/* Header */}

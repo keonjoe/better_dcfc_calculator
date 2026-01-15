@@ -627,7 +627,7 @@ const FuelVsCharge = () => {
   const getEnvBarWidth = (val) => (val / maxEnv) * 100;
 
   return (
-    <div className={`${darkMode ? 'dark' : ''} transition-colors duration-300`}>
+    <div className={`${darkMode ? 'dark' : ''} transition-colors duration-300 overflow-x-hidden`}>
       <style>{SLIDER_STYLES}</style>
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-6 font-sans text-slate-800 dark:text-slate-100 transition-colors duration-200">
         <div className="max-w-6xl mx-auto">
