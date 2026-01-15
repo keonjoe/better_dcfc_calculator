@@ -512,7 +512,7 @@ export default function EVChargingCalculator() {
   const [makes, setMakes] = useState([]);
   const [models, setModels] = useState([]);
   const [variants, setVariants] = useState([]);
-  const [excludeChineseMakes, setExcludeChineseMakes] = useState(true);
+  const [excludeChineseMakes, setExcludeChineseMakes] = useState(false);
   
   const [selectedMake, setSelectedMake] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
