@@ -84,18 +84,6 @@ function App() {
                 <span className="hidden sm:inline">Lifetime Cost Calculator</span>
                 <span className="sm:hidden">Lifetime</span>
               </button>
-              <button
-                onClick={() => setCurrentApp('siteroi')}
-                className={`flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg font-medium transition-all text-sm whitespace-nowrap ${
-                  currentApp === 'siteroi'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-                }`}
-              >
-                <BarChart size={16} className="sm:w-[18px] sm:h-[18px]" />
-                <span className="hidden sm:inline">Site ROI Calculator</span>
-                <span className="sm:hidden">Site ROI</span>
-              </button>
               
               {/* Global Dark Mode Toggle */}
               <div className="relative ml-1 sm:ml-4">
