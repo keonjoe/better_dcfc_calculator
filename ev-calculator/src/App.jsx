@@ -1,10 +1,9 @@
 import { useState, createContext, useEffect } from 'react'
 import EVChargingCalculator from './EVChargingCalculator'
 import LifetimeCostCalculator from './LifetimeCostCalculator'
-import SiteROICalc from './SiteROICalc'
 import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/react'
-import { Calculator, DollarSign, BarChart, Sun, Moon } from 'lucide-react'
+import { Calculator, DollarSign, Sun, Moon } from 'lucide-react'
 
 // Create a context for global dark mode
 export const DarkModeContext = createContext()
@@ -56,17 +55,6 @@ function App() {
                 <DollarSign size={18} />
                 <span>Lifetime Cost Calculator</span>
               </button>
-              <button
-                onClick={() => setCurrentApp('siteroi')}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                  currentApp === 'siteroi'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-                }`}
-              >
-                <BarChart size={18} />
-                <span>Site ROI Calculator</span>
-              </button>
               
               {/* Global Dark Mode Toggle */}
               <div className="relative ml-4">
@@ -90,7 +78,7 @@ function App() {
         </div>
 
         {/* Render the selected app */}
-        {currentApp === 'charging' ? <EVChargingCalculator /> : currentApp === 'lifetime' ? <LifetimeCostCalculator /> : <SiteROICalc />}
+        {currentApp === 'charging' ? <EVChargingCalculator /> : <LifetimeCostCalculator />}
         
         <Analytics />
         <SpeedInsights />
