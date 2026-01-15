@@ -6,5 +6,5 @@
     </linearGradient>
   </defs>
   <circle cx="50" cy="50" r="45" fill="url(#grad)"/>
-  <path d="M 35 30 L 55 30 L 45 50 L 55 50 L 35 75 L 42 55 L 35 55 Z" fill="white" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M 41 25 L 63 25 L 52 47 L 63 47 L 41 75 L 49 53 L 41 53 Z" fill="white" stroke="white" stroke-width="2" stroke-linejoin="round"/>
 </svg>
