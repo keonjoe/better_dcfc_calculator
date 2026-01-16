@@ -1,4 +1,4 @@
-import { useState, createContext, useEffect } from 'react'
+import { useState, createContext, useEffect, useRef } from 'react'
 import EVChargingCalculator from './EVChargingCalculator'
 import LifetimeCostCalculator from './LifetimeCostCalculator'
 import { Analytics } from '@vercel/analytics/react'
@@ -12,8 +12,10 @@ function App() {
   const [darkMode, setDarkMode] = useState(true) // Default to dark mode
   const [currentApp, setCurrentApp] = useState('charging') // 'charging' or 'lifetime'
   const [showTooltip, setShowTooltip] = useState(false)
+  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 })
   const [navbarVisible, setNavbarVisible] = useState(true)
   const [lastScrollY, setLastScrollY] = useState(0)
+  const darkModeButtonRef = useRef(null)
 
   // Clear all persisted data when user exits the site
   useEffect(() => {
@@ -86,25 +88,38 @@ function App() {
               </button>
               
               {/* Global Dark Mode Toggle */}
-              <div className="relative ml-1 sm:ml-4">
+              <div className="ml-1 sm:ml-4">
                 <button 
+                  ref={darkModeButtonRef}
                   onClick={() => setDarkMode(!darkMode)}
-                  onMouseEnter={() => setShowTooltip(true)}
+                  onMouseEnter={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTooltipPosition({
+                      top: rect.bottom + 8,
+                      left: rect.left + rect.width / 2
+                    });
+                    setShowTooltip(true);
+                  }}
                   onMouseLeave={() => setShowTooltip(false)}
                   className="p-2 rounded-full bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
                   aria-label="Toggle Dark Mode"
                 >
                   {darkMode ? <Sun size={16} className="sm:w-[18px] sm:h-[18px]" /> : <Moon size={16} className="sm:w-[18px] sm:h-[18px]" />}
                 </button>
-                {showTooltip && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-3 py-1.5 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded whitespace-nowrap pointer-events-none z-50 shadow-lg">
-                    {darkMode ? "Prepare to be blinded!" : "Join the dark side!"}
-                  </div>
-                )}
               </div>
             </div>
           </div>
         </div>
+
+        {/* Tooltip - Rendered outside navigation bar */}
+        {showTooltip && (
+          <div 
+            className="fixed px-3 py-1.5 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded whitespace-nowrap pointer-events-none z-[100] shadow-lg -translate-x-1/2"
+            style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }}
+          >
+            {darkMode ? "Prepare to be blinded!" : "Join the dark side!"}
+          </div>
+        )}
 
         {/* Render the selected app */}
         {currentApp === 'charging' ? <EVChargingCalculator /> : <LifetimeCostCalculator />}
