@@ -1015,7 +1015,8 @@ export default function EVChargingCalculator() {
       setSelectedScenarioIndex(idx);
       const s = rangeScenarios[idx];
       if (s && s.range_km) {
-          setMaxRange(Math.round(s.range_km * 0.621371));
+          setDbRangeKm(s.range_km);
+          setMaxRange(maxRangeUnit === 'mi' ? Math.round(s.range_km * 0.621371) : Math.round(s.range_km));
       }
   };
 
@@ -1835,7 +1836,7 @@ export default function EVChargingCalculator() {
                         >
                           {rangeScenarios.map((opt, idx) => (
                             <option key={idx} value={idx}>
-                              {formatLabel(opt.scenario_name)} ({Math.round(opt.range_km * 0.621371)} mi)
+                              {formatLabel(opt.scenario_name)} ({maxRangeUnit === 'mi' ? Math.round(opt.range_km * 0.621371) : Math.round(opt.range_km)} {maxRangeUnit})
                             </option>
                           ))}
                         </select>
