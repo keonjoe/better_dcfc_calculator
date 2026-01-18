@@ -2892,6 +2892,13 @@ export default function EVChargingCalculator() {
                   </div>
 
                   <div>
+                    <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Privacy and Data Usage</h3>
+                    <p>
+                      All data is stored locally in your browser and removed when you close the tab or refresh the page. No data is sent to any server, ensuring your privacy.
+                    </p>
+                  </div>
+
+                  <div>
                     <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Contact</h3>
                     <p>
                       Questions? Feedback? Please feel free to message me directly on  <a href="https://www.linkedin.com/in/keonjoe" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 inline-flex">
