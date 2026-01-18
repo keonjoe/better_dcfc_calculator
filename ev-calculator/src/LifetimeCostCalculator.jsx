@@ -101,16 +101,22 @@ const SLIDER_STYLES = `
 
 const UnitToggle = ({ value, options, onChange, label }) => {
   return (
-    <button
-      onClick={() => {
-        const nextIndex = (options.indexOf(value) + 1) % options.length;
-        onChange(options[nextIndex]);
-      }}
-      className="ml-2 px-2 py-1 text-xs font-bold rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors uppercase"
-      title={`Toggle ${label || 'Unit'}`}
-    >
-      {value}
-    </button>
+    <div className="ml-2 flex gap-1">
+      {options.map((option) => (
+        <button
+          key={option}
+          onClick={() => onChange(option)}
+          className={`px-2 py-1 text-xs font-bold rounded transition-colors uppercase ${
+            value === option
+              ? 'bg-blue-500 text-white'
+              : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+          }`}
+          title={`Select ${option}`}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
   );
 };
 
