@@ -277,6 +277,7 @@ const FuelVsCharge = () => {
       gasLeaseMonthly: 350,
       gasLeaseDownPayment: 2000,
       gasLeaseTerm: 36, // months
+      gasLeaseBuyoutCost: 15000,
       // Gas Finance Options
       gasFinanceDownPayment: 5000,
       gasFinanceAPR: 5.5,
@@ -291,6 +292,7 @@ const FuelVsCharge = () => {
       evLeaseMonthly: 450,
       evLeaseDownPayment: 3000,
       evLeaseTerm: 36, // months
+      evLeaseBuyoutCost: 20000,
       // EV Finance Options
       evFinanceDownPayment: 7000,
       evFinanceAPR: 4.5,
@@ -469,22 +471,26 @@ const FuelVsCharge = () => {
           total: inputs[`${prefix}PurchasePrice`],
           downPayment: inputs[`${prefix}PurchasePrice`],
           monthlyPayments: 0,
+          buyoutCosts: 0,
           interest: 0
         };
       } else if (method === 'lease') {
         const monthlyPayment = inputs[`${prefix}LeaseMonthly`];
         const downPayment = inputs[`${prefix}LeaseDownPayment`];
         const leaseTerm = inputs[`${prefix}LeaseTerm`];
+        const buyoutCost = inputs[`${prefix}LeaseBuyoutCost`];
         
-        // If ownership period exceeds lease term, assume multiple leases
-        const numLeases = Math.ceil(ownershipMonths / leaseTerm);
-        const totalDownPayments = downPayment * numLeases;
-        const totalMonthlyPayments = monthlyPayment * Math.min(ownershipMonths, leaseTerm * numLeases);
+        // Lease for the lease term or ownership period, whichever is shorter
+        const leasedMonths = Math.min(ownershipMonths, leaseTerm);
+        const totalDownPayments = downPayment;
+        const totalMonthlyPayments = monthlyPayment * leasedMonths;
+        const totalBuyoutCosts = ownershipMonths > leaseTerm ? buyoutCost : 0;
         
         return {
-          total: totalDownPayments + totalMonthlyPayments,
+          total: totalDownPayments + totalMonthlyPayments + totalBuyoutCosts,
           downPayment: totalDownPayments,
           monthlyPayments: totalMonthlyPayments,
+          buyoutCosts: totalBuyoutCosts,
           interest: 0 // Lease interest is included in monthly payment
         };
       } else if (method === 'finance') {
@@ -502,10 +508,11 @@ const FuelVsCharge = () => {
           total: downPayment + totalPayments,
           downPayment: downPayment,
           monthlyPayments: principal, // Principal portion
+          buyoutCosts: 0,
           interest: totalInterest
         };
       }
-      return { total: 0, downPayment: 0, monthlyPayments: 0, interest: 0 };
+      return { total: 0, downPayment: 0, monthlyPayments: 0, buyoutCosts: 0, interest: 0 };
     };
 
     const gasAcquisitionBreakdown = calculateAcquisitionBreakdown(gasAcquisitionMethod, 'gas');
@@ -843,6 +850,17 @@ const FuelVsCharge = () => {
                             min={12} max={60} step={1}
                             colorClass="text-orange-500"
                           />
+                          <SliderControl
+                            label="Buyout Cost"
+                            icon={DollarSign}
+                            value={inputs.gasLeaseBuyoutCost}
+                            unit={currency}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('gasLeaseBuyoutCost', v)}
+                            min={0} max={50000} step={500}
+                            colorClass="text-orange-500"
+                            helpText="Cost to purchase the vehicle at lease end"
+                          />
                         </>
                       )}
 
@@ -1033,6 +1051,17 @@ const FuelVsCharge = () => {
                             onValueChange={(v) => updateInput('evLeaseTerm', v)}
                             min={12} max={60} step={1}
                             colorClass="text-emerald-500"
+                          />
+                          <SliderControl
+                            label="Buyout Cost"
+                            icon={DollarSign}
+                            value={inputs.evLeaseBuyoutCost}
+                            unit={currency}
+                            currency={currency}
+                            onValueChange={(v) => updateInput('evLeaseBuyoutCost', v)}
+                            min={0} max={50000} step={500}
+                            colorClass="text-emerald-500"
+                            helpText="Cost to purchase the vehicle at lease end"
                           />
                         </>
                       )}
@@ -1357,6 +1386,17 @@ const FuelVsCharge = () => {
                                         onLeave={handleSegmentLeave}
                                       />
                                     )}
+                                    {gasAcquisitionMethod === 'lease' && results.gasAcquisitionBreakdown.buyoutCosts > 0 && (
+                                      <ChartSegment
+                                        width={getTcoBarWidth(results.gasAcquisitionBreakdown.buyoutCosts)}
+                                        color="bg-slate-300"
+                                        label="Buyout"
+                                        tooltipTitle="Lease Buyout Cost"
+                                        tooltipValue={`${currency}${results.gasAcquisitionBreakdown.buyoutCosts.toLocaleString()}`}
+                                        onHover={handleSegmentHover}
+                                        onLeave={handleSegmentLeave}
+                                      />
+                                    )}
                                     {results.gasAcquisitionBreakdown.interest > 0 && (
                                       <ChartSegment
                                         width={getTcoBarWidth(results.gasAcquisitionBreakdown.interest)}
@@ -1435,6 +1475,17 @@ const FuelVsCharge = () => {
                                         label={evAcquisitionMethod === 'lease' ? 'Lease' : 'Principal'}
                                         tooltipTitle={evAcquisitionMethod === 'lease' ? 'Lease Payments' : 'Principal Payments'}
                                         tooltipValue={`${currency}${results.evAcquisitionBreakdown.monthlyPayments.toLocaleString()}`}
+                                        onHover={handleSegmentHover}
+                                        onLeave={handleSegmentLeave}
+                                      />
+                                    )}
+                                    {evAcquisitionMethod === 'lease' && results.evAcquisitionBreakdown.buyoutCosts > 0 && (
+                                      <ChartSegment
+                                        width={getTcoBarWidth(results.evAcquisitionBreakdown.buyoutCosts)}
+                                        color="bg-slate-300"
+                                        label="Buyout"
+                                        tooltipTitle="Lease Buyout Cost"
+                                        tooltipValue={`${currency}${results.evAcquisitionBreakdown.buyoutCosts.toLocaleString()}`}
                                         onHover={handleSegmentHover}
                                         onLeave={handleSegmentLeave}
                                       />
