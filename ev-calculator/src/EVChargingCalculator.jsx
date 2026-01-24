@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useContext } from 'react';
 import { Battery, Zap, Clock, MapPin, Settings, Info, Upload, Database, ChevronDown, List, Loader2, Edit3, X, Sun, Moon, Linkedin, Globe, Activity, BarChart3, BookOpen } from 'lucide-react';
 import { DarkModeContext } from './App';
+import SEO from './SEO';
 
 const Card = ({ children, className = "" }) => (
   <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 ${className}`}>
@@ -1556,7 +1557,14 @@ export default function EVChargingCalculator() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-4 md:p-6 transition-colors duration-200 overflow-x-hidden">
+    <>
+      <SEO 
+        title="EV Charging Calculator - DC Fast Charging Cost & Time Estimator"
+        description="Calculate DC fast charging (DCFC) costs, charging time, and efficiency for your electric vehicle. Compare battery charging curves, analyze charging speeds, and optimize your EV charging strategy."
+        keywords="EV charging calculator, DCFC calculator, DC fast charging cost, EV charging time, battery charging curve, Tesla charging, electric vehicle calculator, fast charging estimator"
+        url="https://ev-calculator.vercel.app/charging"
+      />
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-4 md:p-6 transition-colors duration-200 overflow-x-hidden">
       
       <div className="max-w-6xl mx-auto">
         {/* Header */}
@@ -2937,5 +2945,6 @@ export default function EVChargingCalculator() {
           )}
       </div>
     </div>
+    </>
   );
 }

@@ -1,0 +1,11 @@
+# robots.txt for EV Charging Calculator
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /*.json$
+
+# Sitemap location
+Sitemap: https://ev-calculator.vercel.app/sitemap.xml
+
+# Crawl delay (optional, in seconds)
+Crawl-delay: 1

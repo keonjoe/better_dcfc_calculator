@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useContext } from 'react';
 import { Fuel, Zap, TrendingDown, Sun, Moon, Info, Battery, Gauge, Wrench, Car, PiggyBank, Plus, Trash2, Calendar, Globe, Linkedin, Leaf, Factory, Cloud, Trees, Flame, ChevronDown, ChevronUp, ExternalLink, Home, Mountain, RefreshCw, Activity, DollarSign } from 'lucide-react';
 import { DarkModeContext } from './App';
+import SEO from './SEO';
 
 // --- Conversion Constants ---
 const GAL_TO_L = 3.78541;
@@ -674,7 +675,14 @@ const FuelVsCharge = () => {
   const getEnvBarWidth = (val) => (val / maxEnv) * 100;
 
   return (
-    <div className={`${darkMode ? 'dark' : ''} transition-colors duration-300 overflow-x-hidden`}>
+    <>
+      <SEO 
+        title="EV Lifetime Cost Calculator - Compare Electric vs Gas Vehicle Costs"
+        description="Calculate and compare total lifetime costs between electric vehicles and gas cars. Analyze fuel vs charging costs, maintenance expenses, environmental impact, and TCO (Total Cost of Ownership)."
+        keywords="EV cost calculator, electric car cost comparison, gas vs electric cost, lifetime EV cost, TCO calculator, fuel cost comparison, EV maintenance cost, electric vehicle savings"
+        url="https://ev-calculator.vercel.app/lifetime"
+      />
+      <div className={`${darkMode ? 'dark' : ''} transition-colors duration-300 overflow-x-hidden`}>
       <style>{SLIDER_STYLES}</style>
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-6 font-sans text-slate-800 dark:text-slate-100 transition-colors duration-200">
         <div className="max-w-6xl mx-auto">
@@ -1890,6 +1898,7 @@ const FuelVsCharge = () => {
         </div>
       </div>
     </div>
+    </>
   );
 };
 
