@@ -5,3 +5,8 @@ dist-ssr
 *.local
 .vercel
 *.db
+
+# Environment variables
+.env*
+.env.local
+.env.*.local
