@@ -6,7 +6,7 @@
   
   <!-- Homepage / Charging Calculator -->
   <url>
-    <loc>https://ev-calculator.vercel.app/</loc>
+    <loc>https://better-dcfc-calculator.vercel.app/</loc>
     <lastmod>2026-01-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
@@ -14,7 +14,7 @@
   
   <!-- Charging Calculator -->
   <url>
-    <loc>https://ev-calculator.vercel.app/charging</loc>
+    <loc>https://better-dcfc-calculator.vercel.app/charging</loc>
     <lastmod>2026-01-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
@@ -22,7 +22,7 @@
   
   <!-- Lifetime Cost Calculator -->
   <url>
-    <loc>https://ev-calculator.vercel.app/lifetime</loc>
+    <loc>https://better-dcfc-calculator.vercel.app/lifetime</loc>
     <lastmod>2026-01-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>

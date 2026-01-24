@@ -680,7 +680,7 @@ const FuelVsCharge = () => {
         title="EV Lifetime Cost Calculator - Compare Electric vs Gas Vehicle Costs"
         description="Calculate and compare total lifetime costs between electric vehicles and gas cars. Analyze fuel vs charging costs, maintenance expenses, environmental impact, and TCO (Total Cost of Ownership)."
         keywords="EV cost calculator, electric car cost comparison, gas vs electric cost, lifetime EV cost, TCO calculator, fuel cost comparison, EV maintenance cost, electric vehicle savings"
-        url="https://ev-calculator.vercel.app/lifetime"
+        url="https://better-dcfc-calculator.vercel.app/lifetime"
       />
       <div className={`${darkMode ? 'dark' : ''} transition-colors duration-300 overflow-x-hidden`}>
       <style>{SLIDER_STYLES}</style>

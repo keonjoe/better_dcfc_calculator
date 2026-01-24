@@ -1562,7 +1562,7 @@ export default function EVChargingCalculator() {
         title="EV Charging Calculator - DC Fast Charging Cost & Time Estimator"
         description="Calculate DC fast charging (DCFC) costs, charging time, and efficiency for your electric vehicle. Compare battery charging curves, analyze charging speeds, and optimize your EV charging strategy."
         keywords="EV charging calculator, DCFC calculator, DC fast charging cost, EV charging time, battery charging curve, Tesla charging, electric vehicle calculator, fast charging estimator"
-        url="https://ev-calculator.vercel.app/charging"
+        url="https://better-dcfc-calculator.vercel.app/charging"
       />
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-4 md:p-6 transition-colors duration-200 overflow-x-hidden">
       

@@ -4,8 +4,8 @@ const SEO = ({
   title = "EV Charging Calculator - Compare DC Fast Charging Costs & Times",
   description = "Free EV charging calculator to estimate DC fast charging (DCFC) costs, time, and efficiency. Compare charging speeds, battery curves, and lifetime costs for electric vehicles.",
   keywords = "EV charging calculator, DCFC calculator, electric vehicle charging cost, fast charging time, EV battery charging curve, Tesla charging calculator, EV cost calculator, electric car charging",
-  url = "https://ev-calculator.vercel.app/",
-  image = "https://ev-calculator.vercel.app/og-image.png",
+  url = "https://better-dcfc-calculator.vercel.app/",
+  image = "https://better-dcfc-calculator.vercel.app/og-image.png",
   type = "website"
 }) => {
   return (

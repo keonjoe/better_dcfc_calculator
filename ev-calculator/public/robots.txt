@@ -5,7 +5,7 @@ Disallow: /api/
 Disallow: /*.json$
 
 # Sitemap location
-Sitemap: https://ev-calculator.vercel.app/sitemap.xml
+Sitemap: https://better-dcfc-calculator.vercel.app/sitemap.xml
 
 # Crawl delay (optional, in seconds)
 Crawl-delay: 1
