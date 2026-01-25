@@ -506,6 +506,11 @@ export default function EVChargingCalculator() {
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   
+  // Refs for cleanup of timeouts
+  const feedbackTimeoutRef = useRef(null);
+  const dbInitTimeoutRef = useRef(null);
+  const leaderboardTimeoutRef = useRef(null);
+  
   // Modes: 'database' or 'custom'
   const [mode, setMode] = useState('database');
 
@@ -627,6 +632,33 @@ export default function EVChargingCalculator() {
     localStorage.setItem('customLeaderboardVehicles', JSON.stringify(customLeaderboardVehicles));
   }, [customLeaderboardVehicles]);
 
+  // Cleanup timeouts on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
+      }
+      if (dbInitTimeoutRef.current) {
+        clearTimeout(dbInitTimeoutRef.current);
+      }
+      if (leaderboardTimeoutRef.current) {
+        clearTimeout(leaderboardTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Auto-clear feedback messages after 3 seconds
+  useEffect(() => {
+    if (leaderboardFeedback) {
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
+      }
+      feedbackTimeoutRef.current = setTimeout(() => {
+        setLeaderboardFeedback('');
+      }, 3000);
+    }
+  }, [leaderboardFeedback]);
+
   // --- Formatters ---
   const formatLabel = (str) => {
     if (!str) return '';
@@ -646,7 +678,6 @@ export default function EVChargingCalculator() {
   const addCustomToLeaderboard = () => {
     if (mode !== 'custom') {
       setLeaderboardFeedback('This feature is only available in Custom mode.');
-      setTimeout(() => setLeaderboardFeedback(''), 3000);
       return;
     }
     
@@ -665,7 +696,6 @@ export default function EVChargingCalculator() {
     
     setCustomLeaderboardVehicles(prev => [...prev, customVehicle]);
     setLeaderboardFeedback('✓ Added to leaderboard!');
-    setTimeout(() => setLeaderboardFeedback(''), 3000);
   };
 
   // Extract driving speed from scenario name
@@ -721,7 +751,7 @@ export default function EVChargingCalculator() {
           setSelectedVehicleMakes(makesList); // Select all makes by default
           
           // Select random vehicle on app initialization
-          setTimeout(() => {
+          dbInitTimeoutRef.current = setTimeout(() => {
             const randomMake = makesList[Math.floor(Math.random() * makesList.length)];
             const modelsRes = newDb.exec(`SELECT DISTINCT model FROM vehicles WHERE make = '${randomMake}' ORDER BY model ASC`);
             if (modelsRes.length > 0) {
@@ -1204,7 +1234,7 @@ export default function EVChargingCalculator() {
     setIsCalculatingLeaderboard(true);
     
     // Use setTimeout to allow UI to update with loading state
-    setTimeout(() => {
+    leaderboardTimeoutRef.current = setTimeout(() => {
       try {
         console.log('Calculate Leaderboard - Starting');
         console.log('Available countries:', availableCountries.length);
