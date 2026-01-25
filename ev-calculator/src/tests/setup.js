@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom';
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 // Cleanup after each test
 afterEach(() => {
@@ -53,20 +55,33 @@ const localStorageMock = {
 };
 globalThis.localStorage = localStorageMock;
 
-// Mock fetch for database loading
-globalThis.fetch = vi.fn((url) => {
+// Use real fetch for database loading - let tests use production database
+// Tests can override this if they need to test database error scenarios
+globalThis.fetch = vi.fn(async (url, options) => {
   if (url === '/ev_data.db') {
-    // Return a mock response for the database file
-    return Promise.resolve({
-      ok: false,
-      status: 404,
-      arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
-    });
+    try {
+      // Read the actual database file from the public directory
+      const dbPath = resolve(process.cwd(), 'public', 'ev_data.db');
+      const arrayBuffer = readFileSync(dbPath).buffer;
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(arrayBuffer),
+      };
+    } catch (error) {
+      console.error('Failed to load database file:', error);
+      return {
+        ok: false,
+        status: 404,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+      };
+    }
   }
-  return Promise.resolve({
+  // For other URLs, use default mock response
+  return {
     ok: true,
     json: () => Promise.resolve({}),
-  });
+  };
 });
 
 // Mock sql.js initialization
