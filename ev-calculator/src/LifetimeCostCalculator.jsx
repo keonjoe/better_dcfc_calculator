@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useMemo, useRef, useContext } from 'react';
-import { Fuel, Zap, TrendingDown, Sun, Moon, Info, Battery, Gauge, Wrench, Car, PiggyBank, Plus, Trash2, Calendar, Globe, Linkedin, Leaf, Factory, Cloud, Trees, Flame, ChevronDown, ChevronUp, ExternalLink, Home, Mountain, RefreshCw, Activity, DollarSign } from 'lucide-react';
+import { useState, useEffect, useMemo, useContext } from 'react';
+import { Fuel, Zap, TrendingDown, Info, Battery, Gauge, Wrench, Car, PiggyBank, Plus, Trash2, Calendar, Globe, Linkedin, Leaf, Cloud, Trees, ChevronDown, ChevronUp, Home, RefreshCw, Activity, DollarSign } from 'lucide-react';
 import { DarkModeContext } from './App';
 import SEO from './SEO';
 
 // --- Conversion Constants ---
 const GAL_TO_L = 3.78541;
 const MI_TO_KM = 1.60934;
-const KG_TO_LBS = 2.20462;
 const CURRENCIES = ['$', '€', '£', '¥', '₹', 'C$', 'A$'];
 
 // CO2e Constants (Sources cited in UI)
@@ -100,7 +99,7 @@ const SLIDER_STYLES = `
 
 // --- Helper Components ---
 
-const UnitToggle = ({ value, options, onChange, label }) => {
+const UnitToggle = ({ value, options, onChange }) => {
   return (
     <div className="ml-2 flex gap-1">
       {options.map((option) => (

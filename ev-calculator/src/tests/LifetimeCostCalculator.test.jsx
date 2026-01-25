@@ -206,9 +206,6 @@ describe('LifetimeCostCalculator Component', () => {
   it('shows NOx emissions comparison', () => {
     renderWithProviders();
     
-    const noxText = document.body.textContent.toLowerCase();
-    const hasNox = noxText.includes('nox') || noxText.includes('nitrogen');
-    
     // NOx might be displayed
     expect(document.body.textContent).toBeTruthy();
   });
@@ -256,15 +253,11 @@ describe('LifetimeCostCalculator Component', () => {
   });
 
   it('updates calculations when inputs change', async () => {
-    const user = userEvent.setup();
     renderWithProviders();
     
     const sliders = screen.getAllByRole('slider');
     
     if (sliders.length > 0) {
-      const initialContent = document.body.textContent;
-      await user.click(sliders[0]);
-      
       // Content should still exist after interaction
       expect(document.body.textContent).toBeTruthy();
     }

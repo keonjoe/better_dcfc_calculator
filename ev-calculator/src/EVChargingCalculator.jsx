@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useRef, useContext } from 'react';
-import { Battery, Zap, Clock, MapPin, Settings, Info, Upload, Database, ChevronDown, List, Loader2, Edit3, X, Sun, Moon, Linkedin, Globe, Activity, BarChart3, BookOpen } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef, useContext } from 'react';
+import { Battery, Zap, Clock, MapPin, Settings, Database, ChevronDown, List, Loader2, Edit3, X, Linkedin, Globe, BarChart3, BookOpen } from 'lucide-react';
 import { DarkModeContext } from './App';
 import SEO from './SEO';
 
@@ -1457,7 +1457,6 @@ export default function EVChargingCalculator() {
         }
 
         // Combine vehicles with identical battery and time, even across different makes/models
-        const combined = [];
         const perfGroups = [];
         
         sorted.forEach(vehicle => {
@@ -2653,7 +2652,7 @@ export default function EVChargingCalculator() {
                   ) : leaderboardResults.length === 0 ? (
                     <div className="text-center py-8">
                       <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">
-                        Click "Calculate Leaderboard" to see results
+                        Click &quot;Calculate Leaderboard&quot; to see results
                       </p>
                       <p className="text-xs text-slate-400 dark:text-slate-500">
                         Results are calculated based on your selected criteria

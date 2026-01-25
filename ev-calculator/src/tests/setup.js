@@ -23,7 +23,7 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 // Mock IntersectionObserver
-global.IntersectionObserver = class IntersectionObserver {
+globalThis.IntersectionObserver = class IntersectionObserver {
   constructor() {}
   disconnect() {}
   observe() {}
@@ -34,7 +34,7 @@ global.IntersectionObserver = class IntersectionObserver {
 };
 
 // Mock ResizeObserver
-global.ResizeObserver = class ResizeObserver {
+globalThis.ResizeObserver = class ResizeObserver {
   constructor() {}
   disconnect() {}
   observe() {}
@@ -51,4 +51,32 @@ const localStorageMock = {
   removeItem: vi.fn(),
   clear: vi.fn(),
 };
-global.localStorage = localStorageMock;
+globalThis.localStorage = localStorageMock;
+
+// Mock fetch for database loading
+globalThis.fetch = vi.fn((url) => {
+  if (url === '/ev_data.db') {
+    // Return a mock response for the database file
+    return Promise.resolve({
+      ok: false,
+      status: 404,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+    });
+  }
+  return Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({}),
+  });
+});
+
+// Mock sql.js initialization
+if (typeof window !== 'undefined') {
+  window.initSqlJs = vi.fn(() => 
+    Promise.resolve({
+      Database: vi.fn(() => ({
+        exec: vi.fn(() => []),
+        close: vi.fn(),
+      })),
+    })
+  );
+}
