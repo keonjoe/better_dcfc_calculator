@@ -30,7 +30,8 @@ def setup_database():
             make TEXT,
             model TEXT,
             variant TEXT,
-            variant_url TEXT UNIQUE,
+            variant_url TEXT,
+            battery_configuration TEXT,
             country TEXT,
             battery_gross_kwh REAL,
             battery_net_kwh REAL,
@@ -249,8 +250,34 @@ def scrape_variants(model_url):
                 
     return variants
 
-def parse_charging_curve(variant_url, vehicle_id, cursor):
-    """Fetches and parses the charging curve table."""
+def detect_battery_configurations(variant_url):
+    """Detects if a variant has multiple battery configurations and returns their details."""
+    url = urljoin(variant_url, "chargingcurve/")
+    soup = get_soup(url)
+    if not soup:
+        return []
+    
+    battery_configs = []
+    
+    # Look for battery configuration headers (e.g., "105.0 kWh — Performance Battery Plus (Configuration 1)")
+    # These are typically h2 or h3 headings
+    for heading in soup.find_all(['h2', 'h3']):
+        heading_text = heading.get_text().strip()
+        # Match pattern: "XX.X kWh — Battery Name (Configuration N)"
+        match = re.search(r'([\d.]+)\s*kwh\s*[—–-]\s*(.+?)(?:\s*\(configuration\s*\d+\))?$', heading_text, re.IGNORECASE)
+        if match:
+            battery_kwh = float(match.group(1))
+            battery_name = match.group(2).strip()
+            battery_configs.append({
+                'kwh': battery_kwh,
+                'name': battery_name,
+                'heading': heading
+            })
+    
+    return battery_configs
+
+def parse_charging_curve(variant_url, vehicle_id, cursor, battery_config=None):
+    """Fetches and parses the charging curve table for a specific battery configuration."""
     url = urljoin(variant_url, "chargingcurve/")
     soup = get_soup(url)
     if not soup:
@@ -259,29 +286,57 @@ def parse_charging_curve(variant_url, vehicle_id, cursor):
     tables = soup.find_all('table')
     target_table = None
     
-    # Find table with SOC and Speed headers (complete charging curve data)
-    # Look for the table with most rows containing detailed charging data
-    for table in tables:
-        headers = [th.get_text().strip().lower() for th in table.find_all('th')]
-        # Check if this is the detailed charging curve table
-        if any('soc' in h for h in headers) and any('speed' in h for h in headers):
-            # Verify it's the detailed table (should have many rows, not summary)
+    # If we have a battery configuration, find the table that follows that heading
+    if battery_config and 'heading' in battery_config:
+        # Use find_all_next to search all following elements (not just siblings)
+        all_following_tables = battery_config['heading'].find_all_next('table')
+        
+        for table in all_following_tables:
+            headers = [th.get_text().strip().lower() for th in table.find_all('th')]
             rows = table.find_all('tr')
-            # The complete table has 100+ rows (0-100% SOC)
-            if len(rows) > 50:  # More than 50 rows means it's the detailed table
-                target_table = table
-                break
-    
-    # Fallback: if no large table found, use any table with SOC/Speed headers
-    if not target_table:
+            
+            # Check if this is a detailed charging curve table
+            if any('soc' in h for h in headers) and any('speed' in h for h in headers):
+                if len(rows) > 50:  # Detailed table with 100+ data points
+                    # Verify this table belongs to THIS battery config by checking
+                    # if there's another battery heading between our heading and this table
+                    has_intermediate_battery_heading = False
+                    for elem in battery_config['heading'].find_all_next():
+                        if elem == table:
+                            break
+                        if elem.name in ['h2', 'h3'] and re.search(r'\d+\s*kwh', elem.get_text(), re.IGNORECASE):
+                            # Found another battery heading before reaching this table
+                            has_intermediate_battery_heading = True
+                            break
+                    
+                    if not has_intermediate_battery_heading:
+                        # This is the correct table for this battery config
+                        target_table = table
+                        break
+    else:
+        # Original logic: Find table with SOC and Speed headers (complete charging curve data)
         for table in tables:
             headers = [th.get_text().strip().lower() for th in table.find_all('th')]
+            # Check if this is the detailed charging curve table
             if any('soc' in h for h in headers) and any('speed' in h for h in headers):
-                target_table = table
-                break
+                # Verify it's the detailed table (should have many rows, not summary)
+                rows = table.find_all('tr')
+                # The complete table has 100+ rows (0-100% SOC)
+                if len(rows) > 50:  # More than 50 rows means it's the detailed table
+                    target_table = table
+                    break
+        
+        # Fallback: if no large table found, use any table with SOC/Speed headers
+        if not target_table:
+            for table in tables:
+                headers = [th.get_text().strip().lower() for th in table.find_all('th')]
+                if any('soc' in h for h in headers) and any('speed' in h for h in headers):
+                    target_table = table
+                    break
             
     if target_table:
         rows = target_table.find_all('tr')[1:]  # Skip header row
+        inserted_count = 0
         for row in rows:
             cols = row.find_all('td')
             if len(cols) >= 4:  # Need at least SOC, Speed, Time, Energy columns
@@ -300,6 +355,12 @@ def parse_charging_curve(variant_url, vehicle_id, cursor):
                         INSERT INTO charging_curve (vehicle_id, soc_percent, power_kw, time_elapsed, energy_charged_kwh)
                         VALUES (?, ?, ?, ?, ?)
                     ''', (vehicle_id, soc, power, time_txt, energy))
+                    inserted_count += 1
+        
+        if battery_config:
+            print(f"    Inserted {inserted_count} charging curve points for {battery_config['kwh']}kWh battery")
+        else:
+            print(f"    Inserted {inserted_count} charging curve points")
 
 def parse_range_data(variant_url, vehicle_id, cursor):
     """Fetches and parses range scenarios from rangeandconsumption page."""
@@ -387,6 +448,23 @@ def scrape_variant_details(variant_url, make, model, variant_name, country, curs
     """Main function to process a specific variant."""
     print(f"Processing: {make} {model} - {variant_name}")
     
+    # Check for multiple battery configurations
+    battery_configs = detect_battery_configurations(variant_url)
+    
+    if battery_configs:
+        print(f"  Found {len(battery_configs)} battery configurations")
+        # Process each battery configuration as a separate variant
+        for battery_config in battery_configs:
+            # Append battery capacity to variant name
+            battery_variant_name = f"{variant_name} ({battery_config['kwh']}kWh)"
+            print(f"  Processing battery variant: {battery_variant_name}")
+            scrape_single_variant(variant_url, make, model, battery_variant_name, country, cursor, conn, battery_config)
+    else:
+        # No battery configurations found, process normally
+        scrape_single_variant(variant_url, make, model, variant_name, country, cursor, conn, None)
+
+def scrape_single_variant(variant_url, make, model, variant_name, country, cursor, conn, battery_config=None):
+    """Process a single variant (or battery configuration variant)."""
     # Get specifications page
     specs_url = urljoin(variant_url, "specifications/")
     soup = get_soup(specs_url)
@@ -537,9 +615,10 @@ def scrape_variant_details(variant_url, make, model, variant_name, country, curs
             specs['wltp_basic_range'] = float(wltp_match.group(1))
 
     # Insert Vehicle with all specs
+    battery_config_name = battery_config['name'] if battery_config else None
     cursor.execute('''
         INSERT OR IGNORE INTO vehicles (
-            make, model, variant, variant_url, country,
+            make, model, variant, variant_url, battery_configuration, country,
             battery_gross_kwh, battery_net_kwh, wltp_range_km,
             peak_power_kw, peak_power_boost_kw, torque_nm, torque_boost_nm,
             top_speed_kph, acceleration_0_100_s, acceleration_0_100_boost_s,
@@ -555,9 +634,9 @@ def scrape_variant_details(variant_url, make, model, variant_name, country, curs
             trunk_capacity_l, trunk_capacity_seats_down_l, frunk_capacity_l,
             max_trailer_weight_braked_kg, max_trailer_weight_unbraked_kg, max_towball_weight_kg
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        make, model, variant_name, variant_url, country,
+        make, model, variant_name, variant_url, battery_config_name, country,
         specs['battery_gross'], specs['battery_net'], specs['wltp_basic_range'],
         specs['peak_power'], specs['peak_power_boost'], specs['torque'], specs['torque_boost'],
         specs['top_speed'], specs['accel_0_100'], specs['accel_0_100_boost'],
@@ -576,13 +655,23 @@ def scrape_variant_details(variant_url, make, model, variant_name, country, curs
     
     vehicle_id = cursor.lastrowid
     if vehicle_id == 0:
-        cursor.execute('SELECT id FROM vehicles WHERE variant_url = ?', (variant_url,))
+        # Query needs to include battery_configuration to differentiate multiple configs at same URL
+        cursor.execute('SELECT id FROM vehicles WHERE variant_url = ? AND variant = ?', (variant_url, variant_name))
         res = cursor.fetchone()
         if res: vehicle_id = res[0]
         else: return
 
+    # Override battery specs if we have a battery configuration
+    if battery_config:
+        # Update the vehicle record with the specific battery configuration data
+        cursor.execute('''
+            UPDATE vehicles
+            SET battery_gross_kwh = ?, battery_net_kwh = ?
+            WHERE id = ?
+        ''', (battery_config['kwh'], battery_config['kwh'], vehicle_id))
+
     # 2. Details
-    parse_charging_curve(variant_url, vehicle_id, cursor)
+    parse_charging_curve(variant_url, vehicle_id, cursor, battery_config)
     parse_range_data(variant_url, vehicle_id, cursor)
 
     conn.commit()

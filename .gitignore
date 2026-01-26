@@ -50,3 +50,5 @@ coverage
 ev-calculator/package-lock.json
 ev-calculator/package-lock.json
 ev-calculator/.env.example
+ev_data.db
+*.pyc

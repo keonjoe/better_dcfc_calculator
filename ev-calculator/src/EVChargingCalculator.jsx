@@ -523,6 +523,7 @@ export default function EVChargingCalculator() {
   const [selectedMake, setSelectedMake] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedVariant, setSelectedVariant] = useState(''); // Variant ID
+  const [batteryConfiguration, setBatteryConfiguration] = useState(''); // Battery configuration name
   
   // Range Scenarios
   const [rangeScenarios, setRangeScenarios] = useState([]);
@@ -899,13 +900,14 @@ export default function EVChargingCalculator() {
   useEffect(() => {
     if (!db || !selectedModel) return;
     try {
-      const res = db.exec(`SELECT id, variant, variant_url FROM vehicles WHERE make = '${selectedMake}' AND model = '${selectedModel}'`);
+      const res = db.exec(`SELECT id, variant, variant_url, battery_configuration FROM vehicles WHERE make = '${selectedMake}' AND model = '${selectedModel}'`);
       if (res.length > 0) {
-        const variantsList = res[0].values.map(v => ({ id: v[0], name: v[1], url: v[2] }));
+        const variantsList = res[0].values.map(v => ({ id: v[0], name: v[1], url: v[2], batteryConfig: v[3] }));
         setVariants(variantsList);
         // Only clear selected variant if it's not in the new list
         if (selectedVariant && !variantsList.find(v => v.id === selectedVariant)) {
           setSelectedVariant('');
+          setBatteryConfiguration('');
         }
       }
     } catch (e) { console.warn(e); }
@@ -914,6 +916,14 @@ export default function EVChargingCalculator() {
   // --- Fetch DB Data on Variant Selection ---
   useEffect(() => {
     if (!db || !selectedVariant) return;
+
+    // Update battery configuration
+    const variantObj = variants.find(v => String(v.id) === String(selectedVariant));
+    if (variantObj && variantObj.batteryConfig) {
+      setBatteryConfiguration(variantObj.batteryConfig);
+    } else {
+      setBatteryConfiguration('');
+    }
 
     // Reset user edits when variant changes
     setUserEditedCurve(null);
@@ -998,7 +1008,7 @@ export default function EVChargingCalculator() {
       } catch (e) { console.warn(e); setRangeScenarios([]); }
 
     } catch (e) { console.error(e); }
-  }, [db, selectedVariant, mode]);
+  }, [db, selectedVariant, mode, variants]);
 
   // --- Effect: Handle Curve Logic based on Mode/Inputs ---
   useEffect(() => {
@@ -1278,8 +1288,14 @@ export default function EVChargingCalculator() {
         
         // Get all vehicles with their basic info - with filtering to improve performance
         // Only get vehicles with battery > 40 kWh and that have charging curves
+        // Get usable battery from charging_curve energy_charged_kwh at 100% SOC
         const vehiclesRes = db.exec(`
-          SELECT DISTINCT v.id, v.make, v.model, v.variant, v.battery_net_kwh, v.country
+          SELECT DISTINCT v.id, v.make, v.model, v.variant, 
+                 COALESCE(
+                   (SELECT energy_charged_kwh FROM charging_curve WHERE vehicle_id = v.id AND soc_percent = 100 LIMIT 1),
+                   v.battery_net_kwh
+                 ) as battery_usable,
+                 v.country, v.battery_configuration
           FROM vehicles v
           WHERE v.battery_net_kwh > 40
           AND v.id IN (SELECT DISTINCT vehicle_id FROM charging_curve)
@@ -1300,7 +1316,8 @@ export default function EVChargingCalculator() {
           model: row[2],
           variant: row[3],
           battery: row[4],
-          country: row[5]
+          country: row[5],
+          batteryConfig: row[6]
         }));
 
         console.log('Total vehicles found:', vehicles.length);
@@ -1401,6 +1418,7 @@ export default function EVChargingCalculator() {
             variant: vehicle.variant,
             battery: vehicle.battery,
             country: vehicle.country,
+            batteryConfig: vehicle.batteryConfig,
             rangeMi,
             rangeKm,
             timeMins,
@@ -1523,6 +1541,7 @@ export default function EVChargingCalculator() {
                 make: vehicle.make,
                 model: vehicle.model,
                 country: vehicle.country,
+                batteryConfig: vehicle.batteryConfig,
                 variants: [vehicle.variant]
               });
             }
@@ -1534,6 +1553,7 @@ export default function EVChargingCalculator() {
                 make: vehicle.make,
                 model: vehicle.model,
                 country: vehicle.country,
+                batteryConfig: vehicle.batteryConfig,
                 variants: [vehicle.variant]
               }]
             });
@@ -1583,6 +1603,13 @@ export default function EVChargingCalculator() {
           {h}<span className="text-[10px]">h</span> {m}<span className="text-[10px]">m</span>
         </span>
       );
+  };
+
+  const hasAdditionalBatteryInfo = (batteryConfig) => {
+    if (!batteryConfig) return false;
+    // Remove kWh numbers and check if there's meaningful text remaining
+    const stripped = batteryConfig.replace(/\d+(\.\d+)?\s*kwh/gi, '').trim();
+    return stripped.length > 0;
   };
 
   return (
@@ -1756,6 +1783,11 @@ export default function EVChargingCalculator() {
                         </select>
                         <ChevronDown size={12} className="absolute right-2 top-2 text-slate-400 pointer-events-none"/>
                       </div>
+                      {batteryConfiguration && hasAdditionalBatteryInfo(batteryConfiguration) && (
+                        <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                          {batteryConfiguration.replace(/\d+(\.\d+)?\s*kwh\s*/gi, '').trim()}
+                        </div>
+                      )}
                     </div>
 
                     {/* Custom Mode Extras */}
@@ -1884,7 +1916,7 @@ export default function EVChargingCalculator() {
 
                 <div className="flex gap-3 mb-3">
                   <div className={`flex flex-col ${mode === 'database' ? 'opacity-60 pointer-events-none' : ''}`} style={{width: '45%'}}>
-                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Battery Size</label>
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Usable Battery</label>
                     <div className="flex gap-1">
                       <NumberInput 
                         label="" 
@@ -2211,7 +2243,7 @@ export default function EVChargingCalculator() {
                     <thead>
                       <tr className="border-b-2 border-slate-200 dark:border-slate-700">
                         <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Vehicle</th>
-                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Battery</th>
+                        <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Usable Battery</th>
                         <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Range</th>
                         <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">SoC</th>
                         <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charger</th>
@@ -2695,7 +2727,7 @@ export default function EVChargingCalculator() {
                           <tr>
                             <th className="text-center py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 w-16">Rank</th>
                             <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 w-2/5">Vehicle</th>
-                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 w-32">Battery</th>
+                            <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 w-32">Usable Battery</th>
                             {leaderboardMetric === 'fastest-charging' && (
                               <>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Time</th>
@@ -2765,13 +2797,13 @@ export default function EVChargingCalculator() {
                                         )}
                                       </div>
                                       {v.variants && v.variants.length === 1 ? (
-                                        <div className="text-xs text-slate-500 dark:text-slate-400">{formatLabel(v.variants[0])}</div>
+                                        <div className="text-xs text-slate-500 dark:text-slate-400">{formatLabel(v.variants[0].replace(/\s*\(\d+(\.\d+)?kWh\)/gi, ''))}</div>
                                       ) : (
                                         <div className="text-xs text-slate-500 dark:text-slate-400">
                                           {v.variants.map((variant, i) => (
                                             <span key={i}>
                                               {i > 0 && ', '}
-                                              {formatLabel(variant)}
+                                              {formatLabel(variant.replace(/\s*\(\d+(\.\d+)?kWh\)/gi, ''))}
                                             </span>
                                           ))}
                                         </div>
@@ -2797,6 +2829,9 @@ export default function EVChargingCalculator() {
                               </td>
                               <td className="py-3 px-2">
                                 <div className="text-slate-700 dark:text-slate-200">{vehicle.battery.toFixed(1)} kWh</div>
+                                {vehicle.vehicles && vehicle.vehicles[0] && vehicle.vehicles[0].batteryConfig && hasAdditionalBatteryInfo(vehicle.vehicles[0].batteryConfig) && (
+                                  <div className="text-[10px] text-slate-400 dark:text-slate-500">{vehicle.vehicles[0].batteryConfig.replace(/\d+(\.\d+)?\s*kwh\s*/gi, '').trim()}</div>
+                                )}
                                 <div className="text-[10px] text-slate-400 dark:text-slate-500">{vehicle.rangeMi.toFixed(0)} mi • {vehicle.rangeKm.toFixed(0)} km</div>
                               </td>
                               {leaderboardMetric === 'fastest-charging' && (
