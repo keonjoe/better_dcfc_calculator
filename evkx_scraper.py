@@ -664,11 +664,12 @@ def scrape_single_variant(variant_url, make, model, variant_name, country, curso
     # Override battery specs if we have a battery configuration
     if battery_config:
         # Update the vehicle record with the specific battery configuration data
+        # Only update gross - net battery is already correctly set from specs page
         cursor.execute('''
             UPDATE vehicles
-            SET battery_gross_kwh = ?, battery_net_kwh = ?
+            SET battery_gross_kwh = ?
             WHERE id = ?
-        ''', (battery_config['kwh'], battery_config['kwh'], vehicle_id))
+        ''', (battery_config['kwh'], vehicle_id))
 
     # 2. Details
     parse_charging_curve(variant_url, vehicle_id, cursor, battery_config)

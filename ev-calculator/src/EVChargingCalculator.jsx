@@ -552,7 +552,7 @@ export default function EVChargingCalculator() {
   const [drivingSpeedUnit, setDrivingSpeedUnit] = useState('mph'); // 'mph' or 'kph'
   
   // Leaderboards State
-  const [leaderboardMetric, setLeaderboardMetric] = useState('fastest-charging'); // 'fastest-charging', 'highest-avg-power', 'best-range-per-hour', 'most-efficient', 'speed-efficiency'
+  const [leaderboardMetric, setLeaderboardMetric] = useState('fastest-charging'); // 'fastest-charging', 'highest-avg-power', 'best-range-per-hour', 'most-efficient', 'speed-efficiency', 'lowest-drag-coefficient'
   const [leaderboardStartSoc, setLeaderboardStartSoc] = useState(10);
   const [leaderboardStopSoc, setLeaderboardStopSoc] = useState(80);
   const [leaderboardChargerPower, setLeaderboardChargerPower] = useState(400);
@@ -561,6 +561,11 @@ export default function EVChargingCalculator() {
   const [isCalculatingLeaderboard, setIsCalculatingLeaderboard] = useState(false);
   const [leaderboardRangeScenarios, setLeaderboardRangeScenarios] = useState([]);
   const [leaderboardSelectedScenario, setLeaderboardSelectedScenario] = useState('');
+  const [minBatteryCapacity, setMinBatteryCapacity] = useState(40);
+  const [maxBatteryCapacity, setMaxBatteryCapacity] = useState(200);
+  const [dbMinBatteryCapacity, setDbMinBatteryCapacity] = useState(40);
+  const [dbMaxBatteryCapacity, setDbMaxBatteryCapacity] = useState(200);
+  const [batteryHistogramData, setBatteryHistogramData] = useState([]);
   const [hoveredCurve, setHoveredCurve] = useState(null);
   const [infoFeatureView, setInfoFeatureView] = useState('calculator'); // 'calculator' or 'leaderboard'
   const [customLeaderboardVehicles, setCustomLeaderboardVehicles] = useState(() => {
@@ -659,6 +664,25 @@ export default function EVChargingCalculator() {
       }, 3000);
     }
   }, [leaderboardFeedback]);
+
+  // Update histogram when battery capacity range changes
+  useEffect(() => {
+    if (db && batteryHistogramData.length > 0) {
+      // Only update if isInRange values actually need to change
+      const needsUpdate = batteryHistogramData.some(bin => {
+        const shouldBeInRange = bin.bin >= minBatteryCapacity && bin.bin <= maxBatteryCapacity;
+        return bin.isInRange !== shouldBeInRange;
+      });
+      
+      if (needsUpdate) {
+        const updatedHistData = batteryHistogramData.map(bin => ({
+          ...bin,
+          isInRange: bin.bin >= minBatteryCapacity && bin.bin <= maxBatteryCapacity
+        }));
+        setBatteryHistogramData(updatedHistData);
+      }
+    }
+  }, [minBatteryCapacity, maxBatteryCapacity, db, batteryHistogramData]);
 
   // --- Formatters ---
   const formatLabel = (str) => {
@@ -822,6 +846,49 @@ export default function EVChargingCalculator() {
           setAvailableCountries(countriesList);
           // Initialize includedCountries with all countries by default
           setIncludedCountries(countriesList.map(c => c.name));
+        }
+        
+        // Initialize battery capacity histogram and min/max values
+        const batteryRangeRes = newDb.exec(`
+          SELECT 
+            MIN(battery_net_kwh) as min_battery,
+            MAX(battery_net_kwh) as max_battery
+          FROM vehicles
+          WHERE battery_net_kwh IS NOT NULL AND battery_net_kwh > 0
+        `);
+        
+        if (batteryRangeRes.length > 0 && batteryRangeRes[0].values.length > 0) {
+          const minBattery = Math.floor(batteryRangeRes[0].values[0][0]);
+          const maxBattery = Math.ceil(batteryRangeRes[0].values[0][1]);
+          
+          // Set database min and max battery capacity
+          setDbMinBatteryCapacity(minBattery);
+          setDbMaxBatteryCapacity(maxBattery);
+          
+          // Set initial min and max battery capacity for sliders
+          setMinBatteryCapacity(minBattery);
+          setMaxBatteryCapacity(maxBattery);
+          
+          // Calculate histogram
+          const histogramRes = newDb.exec(`
+            SELECT 
+              CAST((battery_net_kwh / 5) AS INTEGER) * 5 as bin,
+              COUNT(*) as count
+            FROM vehicles
+            WHERE battery_net_kwh IS NOT NULL AND battery_net_kwh > 0
+            GROUP BY bin
+            ORDER BY bin
+          `);
+          
+          if (histogramRes.length && histogramRes[0].values.length) {
+            const histData = histogramRes[0].values.map(row => ({
+              bin: row[0],
+              count: row[1],
+              isInRange: row[0] >= minBattery && row[0] <= maxBattery
+            }));
+            setBatteryHistogramData(histData);
+            console.log('Histogram data loaded:', histData.length, 'bins');
+          }
         }
         
         setError(null);
@@ -1243,6 +1310,15 @@ export default function EVChargingCalculator() {
 
     setIsCalculatingLeaderboard(true);
     
+    // Update histogram data to reflect current filter range
+    if (batteryHistogramData.length > 0) {
+      const updatedHistData = batteryHistogramData.map(bin => ({
+        ...bin,
+        isInRange: bin.bin >= minBatteryCapacity && bin.bin <= maxBatteryCapacity
+      }));
+      setBatteryHistogramData(updatedHistData);
+    }
+    
     // Use setTimeout to allow UI to update with loading state
     leaderboardTimeoutRef.current = setTimeout(() => {
       try {
@@ -1289,15 +1365,17 @@ export default function EVChargingCalculator() {
         // Get all vehicles with their basic info - with filtering to improve performance
         // Only get vehicles with battery > 40 kWh and that have charging curves
         // Get usable battery from charging_curve energy_charged_kwh at 100% SOC
+        // Also get drag_coefficient for the new leaderboard metric
         const vehiclesRes = db.exec(`
           SELECT DISTINCT v.id, v.make, v.model, v.variant, 
                  COALESCE(
                    (SELECT energy_charged_kwh FROM charging_curve WHERE vehicle_id = v.id AND soc_percent = 100 LIMIT 1),
                    v.battery_net_kwh
                  ) as battery_usable,
-                 v.country, v.battery_configuration
+                 v.country, v.battery_configuration, v.drag_coefficient
           FROM vehicles v
-          WHERE v.battery_net_kwh > 40
+          WHERE v.battery_net_kwh >= ${minBatteryCapacity}
+          AND v.battery_net_kwh <= ${maxBatteryCapacity}
           AND v.id IN (SELECT DISTINCT vehicle_id FROM charging_curve)
           ${countryFilter}
           ${makesFilter}
@@ -1317,7 +1395,8 @@ export default function EVChargingCalculator() {
           variant: row[3],
           battery: row[4],
           country: row[5],
-          batteryConfig: row[6]
+          batteryConfig: row[6],
+          dragCoefficient: row[7]
         }));
 
         console.log('Total vehicles found:', vehicles.length);
@@ -1419,6 +1498,7 @@ export default function EVChargingCalculator() {
             battery: vehicle.battery,
             country: vehicle.country,
             batteryConfig: vehicle.batteryConfig,
+            dragCoefficient: vehicle.dragCoefficient,
             rangeMi,
             rangeKm,
             timeMins,
@@ -1502,6 +1582,10 @@ export default function EVChargingCalculator() {
           sorted.sort((a, b) => b.efficiency - a.efficiency);
         } else if (leaderboardMetric === 'speed-efficiency') {
           sorted.sort((a, b) => (b.rangePerHour * b.efficiency) - (a.rangePerHour * a.efficiency));
+        } else if (leaderboardMetric === 'lowest-drag-coefficient') {
+          // Filter out vehicles without drag coefficient and sort by lowest
+          sorted = sorted.filter(v => v.dragCoefficient != null && v.dragCoefficient > 0);
+          sorted.sort((a, b) => a.dragCoefficient - b.dragCoefficient);
         }
 
         // Combine vehicles with identical battery and time, even across different makes/models
@@ -1571,6 +1655,8 @@ export default function EVChargingCalculator() {
           perfGroups.sort((a, b) => b.efficiency - a.efficiency);
         } else if (leaderboardMetric === 'speed-efficiency') {
           perfGroups.sort((a, b) => (b.rangePerHour * b.efficiency) - (a.rangePerHour * a.efficiency));
+        } else if (leaderboardMetric === 'lowest-drag-coefficient') {
+          perfGroups.sort((a, b) => a.dragCoefficient - b.dragCoefficient);
         }
 
         console.log('Results calculated:', sorted.length, 'Combined to:', perfGroups.length);
@@ -2390,6 +2476,7 @@ export default function EVChargingCalculator() {
                         <option value="best-range-per-hour">🏁 Best Range Per Hour</option>
                         <option value="most-efficient">🍃 Most Efficient</option>
                         <option value="speed-efficiency">🚀 Speed × Efficiency</option>
+                        <option value="lowest-drag-coefficient">🌬️ Lowest Drag Coefficient</option>
                       </select>
                       <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                     </div>
@@ -2485,7 +2572,7 @@ export default function EVChargingCalculator() {
                   </div>
 
                   {/* Vehicle Count Slider */}
-                  <div>
+                  <div className="mb-3">
                     <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
                       Number of Vehicles
                     </label>
@@ -2502,6 +2589,190 @@ export default function EVChargingCalculator() {
                           <span className="text-xs text-slate-500 dark:text-slate-400">5</span>
                           <span className="text-base font-bold text-slate-700 dark:text-slate-200">{leaderboardVehicleCount}</span>
                           <span className="text-xs text-slate-500 dark:text-slate-400">100</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Battery Capacity Filter with Histogram */}
+                  <div className="mb-3">
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
+                      Battery Capacity (kWh)
+                    </label>
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                      {/* Histogram */}
+                      {batteryHistogramData.length > 0 && (
+                        <div className="mb-0">
+                          <div className="relative h-20 w-full">
+                            <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 100">
+                              {/* Create smooth line path */}
+                              {(() => {
+                                const maxCount = Math.max(...batteryHistogramData.map(b => b.count));
+                                const minBin = batteryHistogramData[0]?.bin || 0;
+                                const maxBin = (batteryHistogramData[batteryHistogramData.length - 1]?.bin || 0) + 5;
+                                const binRange = maxBin - minBin;
+                                
+                                // Generate path points
+                                const points = batteryHistogramData.map((bin, idx) => {
+                                  const x = ((bin.bin - minBin) / binRange) * 100;
+                                  const y = 100 - ((bin.count / maxCount) * 95); // 95 to leave some padding
+                                  return { x, y, bin };
+                                });
+                                
+                                // Create smooth curve using quadratic bezier curves
+                                let pathD = `M ${points[0].x} ${points[0].y}`;
+                                
+                                for (let i = 0; i < points.length - 1; i++) {
+                                  const current = points[i];
+                                  const next = points[i + 1];
+                                  const controlX = (current.x + next.x) / 2;
+                                  pathD += ` Q ${controlX} ${current.y}, ${controlX} ${(current.y + next.y) / 2}`;
+                                  pathD += ` Q ${controlX} ${next.y}, ${next.x} ${next.y}`;
+                                }
+                                
+                                // Create filled area paths for in-range and out-of-range sections
+                                const inRangePaths = [];
+                                const outRangePaths = [];
+                                let currentPath = null;
+                                let currentStartX = null;
+                                let currentType = null;
+                                
+                                for (let i = 0; i < points.length; i++) {
+                                  const point = points[i];
+                                  const isInRange = point.bin.isInRange;
+                                  
+                                  if (currentType !== isInRange) {
+                                    // Close previous path
+                                    if (currentPath) {
+                                      const lastPoint = points[i - 1];
+                                      currentPath += ` L ${lastPoint.x} 100 L ${currentStartX} 100 Z`;
+                                      if (currentType) {
+                                        inRangePaths.push(currentPath);
+                                      } else {
+                                        outRangePaths.push(currentPath);
+                                      }
+                                    }
+                                    
+                                    // Start new path
+                                    currentPath = `M ${point.x} 100 L ${point.x} ${point.y}`;
+                                    currentStartX = point.x;
+                                    currentType = isInRange;
+                                  } else if (currentPath) {
+                                    // Continue path with smooth curve
+                                    if (i > 0) {
+                                      const prev = points[i - 1];
+                                      const controlX = (prev.x + point.x) / 2;
+                                      currentPath += ` Q ${controlX} ${prev.y}, ${controlX} ${(prev.y + point.y) / 2}`;
+                                      currentPath += ` Q ${controlX} ${point.y}, ${point.x} ${point.y}`;
+                                    }
+                                  }
+                                }
+                                
+                                // Close final path
+                                if (currentPath && points.length > 0) {
+                                  const lastPoint = points[points.length - 1];
+                                  currentPath += ` L ${lastPoint.x} 100 L ${currentStartX} 100 Z`;
+                                  if (currentType) {
+                                    inRangePaths.push(currentPath);
+                                  } else {
+                                    outRangePaths.push(currentPath);
+                                  }
+                                }
+                                
+                                return (
+                                  <>
+                                    {/* Out of range areas (greyed out) */}
+                                    {outRangePaths.map((path, idx) => (
+                                      <path
+                                        key={`out-${idx}`}
+                                        d={path}
+                                        className="fill-slate-300 dark:fill-slate-600 opacity-30"
+                                      />
+                                    ))}
+                                    
+                                    {/* In range areas (blue) */}
+                                    {inRangePaths.map((path, idx) => (
+                                      <path
+                                        key={`in-${idx}`}
+                                        d={path}
+                                        className="fill-blue-500 dark:fill-blue-400 opacity-40"
+                                      />
+                                    ))}
+                                    
+                                    {/* Main line (full curve) */}
+                                    <path
+                                      d={pathD}
+                                      className="fill-none stroke-blue-600 dark:stroke-blue-400"
+                                      strokeWidth="1"
+                                      vectorEffect="non-scaling-stroke"
+                                    />
+                                    
+                                    {/* Interactive points */}
+                                    {points.map((point, idx) => (
+                                      <g key={idx} className="group">
+                                        <circle
+                                          cx={point.x}
+                                          cy={point.y}
+                                          r="1"
+                                          className="fill-blue-600 dark:fill-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                          vectorEffect="non-scaling-stroke"
+                                        />
+                                        <title>{point.bin.bin}-{point.bin.bin + 5} kWh: {point.bin.count} vehicles</title>
+                                      </g>
+                                    ))}
+                                  </>
+                                );
+                              })()}
+                            </svg>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Range Sliders */}
+                      <div className="relative h-12 select-none mt-0">
+                        <div className="absolute top-1/2 left-0 right-0 h-2 bg-slate-200 dark:bg-slate-700 rounded-full -translate-y-1/2"></div>
+                        <div 
+                          className="absolute top-1/2 h-2 bg-blue-500 rounded-full -translate-y-1/2"
+                          style={{ 
+                            left: `${((minBatteryCapacity - dbMinBatteryCapacity) / (dbMaxBatteryCapacity - dbMinBatteryCapacity)) * 100}%`, 
+                            right: `${(1 - (maxBatteryCapacity - dbMinBatteryCapacity) / (dbMaxBatteryCapacity - dbMinBatteryCapacity)) * 100}%` 
+                          }}
+                        ></div>
+                        <input 
+                          type="range" 
+                          min={dbMinBatteryCapacity} 
+                          max={dbMaxBatteryCapacity - 1} 
+                          value={minBatteryCapacity} 
+                          onChange={(e) => { 
+                            const val = Number(e.target.value); 
+                            setMinBatteryCapacity(Math.min(val, maxBatteryCapacity - 1)); 
+                            setLeaderboardResults([]); 
+                          }} 
+                          className="absolute top-1/2 -translate-y-1/2 left-0 w-full h-2 bg-transparent appearance-none pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-4 [&::-webkit-slider-thumb]:border-emerald-500 [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab z-20"
+                        />
+                        <input 
+                          type="range" 
+                          min={dbMinBatteryCapacity + 1} 
+                          max={dbMaxBatteryCapacity} 
+                          value={maxBatteryCapacity} 
+                          onChange={(e) => { 
+                            const val = Number(e.target.value); 
+                            setMaxBatteryCapacity(Math.max(val, minBatteryCapacity + 1)); 
+                            setLeaderboardResults([]); 
+                          }} 
+                          className="absolute top-1/2 -translate-y-1/2 left-0 w-full h-2 bg-transparent appearance-none pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-4 [&::-webkit-slider-thumb]:border-amber-500 [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab z-30"
+                        />
+                        <div 
+                          className="absolute top-8 transform -translate-x-1/2 font-mono font-bold text-emerald-600 dark:text-emerald-400 text-xs transition-all"
+                          style={{ left: `${((minBatteryCapacity - dbMinBatteryCapacity) / (dbMaxBatteryCapacity - dbMinBatteryCapacity)) * 100}%` }}
+                        >
+                          {minBatteryCapacity}
+                        </div>
+                        <div 
+                          className="absolute top-8 transform -translate-x-1/2 font-mono font-bold text-amber-500 dark:text-amber-400 text-xs transition-all"
+                          style={{ left: `${((maxBatteryCapacity - dbMinBatteryCapacity) / (dbMaxBatteryCapacity - dbMinBatteryCapacity)) * 100}%` }}
+                        >
+                          {maxBatteryCapacity}
                         </div>
                       </div>
                     </div>
@@ -2703,6 +2974,7 @@ export default function EVChargingCalculator() {
                     {leaderboardMetric === 'best-range-per-hour' && '🏁 Best Range Per Hour'}
                     {leaderboardMetric === 'most-efficient' && '🍃 Most Efficient Vehicles'}
                     {leaderboardMetric === 'speed-efficiency' && '🚀 Best Speed × Efficiency'}
+                    {leaderboardMetric === 'lowest-drag-coefficient' && '🌬️ Lowest Drag Coefficient'}
                   </h3>
                   
                   {isCalculatingLeaderboard ? (
@@ -2758,6 +3030,12 @@ export default function EVChargingCalculator() {
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charging Speed</th>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Efficiency</th>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Speed × Efficiency</th>
+                              </>
+                            )}
+                            {leaderboardMetric === 'lowest-drag-coefficient' && (
+                              <>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Drag Coefficient (Cd)</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Efficiency</th>
                               </>
                             )}
                           </tr>
@@ -2896,6 +3174,17 @@ export default function EVChargingCalculator() {
                                   <td className="py-3 px-2">
                                     <div><span className="font-bold text-slate-700 dark:text-slate-200">{(vehicle.rangePerHour * vehicle.efficiency).toFixed(1)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mph·mi/kWh</span></div>
                                     <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.rangePerHour * 1.60934 * vehicle.efficiency * 1.60934).toFixed(1)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> kph·km/kWh</span></div>
+                                  </td>
+                                </>
+                              )}
+                              {leaderboardMetric === 'lowest-drag-coefficient' && (
+                                <>
+                                  <td className="py-3 px-2">
+                                    <span className="font-bold text-slate-700 dark:text-slate-200 text-lg">{vehicle.dragCoefficient ? vehicle.dragCoefficient.toFixed(3) : 'N/A'}</span>
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.efficiency.toFixed(2)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> mi/kWh</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">{(vehicle.efficiency * 1.60934).toFixed(2)}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> km/kWh</span></div>
                                   </td>
                                 </>
                               )}
