@@ -17,10 +17,11 @@ function App() {
   const [lastScrollY, setLastScrollY] = useState(0)
   const darkModeButtonRef = useRef(null)
 
-  // Clear all persisted data when user exits the site
+  // Clear app-specific persisted data when user exits the site
   useEffect(() => {
     const handleBeforeUnload = () => {
-      localStorage.clear();
+      const appKeys = ['lifetimeCostInputs', 'maintenanceItems', 'comparisonScenarios', 'customLeaderboardVehicles'];
+      appKeys.forEach(key => localStorage.removeItem(key));
     };
     
     window.addEventListener('beforeunload', handleBeforeUnload);

@@ -499,6 +499,27 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
   );
 };
 
+// Helper: execute a parameterized SQL query using sql.js prepared statements.
+// Returns the same shape as db.exec(): an array of result objects.
+function safeExec(db, sql, params = {}) {
+  const stmt = db.prepare(sql);
+  stmt.bind(params);
+  const rows = [];
+  while (stmt.step()) {
+    rows.push(stmt.get());
+  }
+  const columns = stmt.getColumnNames();
+  stmt.free();
+  if (rows.length === 0) return [];
+  return [{ columns, values: rows }];
+}
+
+// Helper: sanitise a value so it is safe to embed in an IN(...) clause.
+// Only allows alphanumeric characters, spaces, hyphens, dots and underscores.
+function sanitizeForIn(value) {
+  return String(value).replace(/[^a-zA-Z0-9 _.\-\u00C0-\u024F]/g, '');
+}
+
 export default function EVChargingCalculator() {
   const { darkMode } = useContext(DarkModeContext);
   const [currentPage, setCurrentPage] = useState('calculator'); // 'calculator', 'leaderboards', or 'info'
@@ -778,12 +799,12 @@ export default function EVChargingCalculator() {
           // Select random vehicle on app initialization
           dbInitTimeoutRef.current = setTimeout(() => {
             const randomMake = makesList[Math.floor(Math.random() * makesList.length)];
-            const modelsRes = newDb.exec(`SELECT DISTINCT model FROM vehicles WHERE make = '${randomMake}' ORDER BY model ASC`);
+            const modelsRes = safeExec(newDb, "SELECT DISTINCT model FROM vehicles WHERE make = :make ORDER BY model ASC", { ':make': randomMake });
             if (modelsRes.length > 0) {
               const modelsList = modelsRes[0].values.map(v => v[0]);
               const randomModel = modelsList[Math.floor(Math.random() * modelsList.length)];
               
-              const varRes = newDb.exec(`SELECT id, variant FROM vehicles WHERE make = '${randomMake}' AND model = '${randomModel}'`);
+              const varRes = safeExec(newDb, "SELECT id, variant FROM vehicles WHERE make = :make AND model = :model", { ':make': randomMake, ':model': randomModel });
               if (varRes.length > 0) {
                 const variantsList = varRes[0].values.map(v => ({ id: v[0], name: v[1] }));
                 const randomVariant = variantsList[Math.floor(Math.random() * variantsList.length)];
@@ -928,7 +949,7 @@ export default function EVChargingCalculator() {
     // Build country filter for SQL query
     let countryFilter = '';
     if (includedCountries.length < availableCountries.length) {
-      const countriesStr = includedCountries.map(c => `'${c}'`).join(',');
+      const countriesStr = includedCountries.map(c => sanitizeForIn(c)).map(c => `'${c}'`).join(',');
       countryFilter = `WHERE country IN (${countriesStr})`;
     }
     
@@ -952,7 +973,7 @@ export default function EVChargingCalculator() {
   // --- Cascading Selects ---
   useEffect(() => {
     if (!db || !selectedMake) return;
-    const res = db.exec(`SELECT DISTINCT model FROM vehicles WHERE make = '${selectedMake}' ORDER BY model ASC`);
+    const res = safeExec(db, "SELECT DISTINCT model FROM vehicles WHERE make = :make ORDER BY model ASC", { ':make': selectedMake });
     if (res.length > 0) {
       const modelsList = res[0].values.map(v => v[0]);
       setModels(modelsList);
@@ -967,7 +988,7 @@ export default function EVChargingCalculator() {
   useEffect(() => {
     if (!db || !selectedModel) return;
     try {
-      const res = db.exec(`SELECT id, variant, variant_url, battery_configuration FROM vehicles WHERE make = '${selectedMake}' AND model = '${selectedModel}'`);
+      const res = safeExec(db, "SELECT id, variant, variant_url, battery_configuration FROM vehicles WHERE make = :make AND model = :model", { ':make': selectedMake, ':model': selectedModel });
       if (res.length > 0) {
         const variantsList = res[0].values.map(v => ({ id: v[0], name: v[1], url: v[2], batteryConfig: v[3] }));
         setVariants(variantsList);
@@ -998,7 +1019,7 @@ export default function EVChargingCalculator() {
 
     try {
       // 1. Get Charging Curve
-      const curveRes = db.exec(`SELECT soc_percent, power_kw, energy_charged_kwh FROM charging_curve WHERE vehicle_id = '${selectedVariant}' ORDER BY soc_percent ASC`);
+      const curveRes = safeExec(db, "SELECT soc_percent, power_kw, energy_charged_kwh FROM charging_curve WHERE vehicle_id = :vid ORDER BY soc_percent ASC", { ':vid': selectedVariant });
       
       let loadedCurve = [];
       let loadedBattery = 0;
@@ -1036,7 +1057,7 @@ export default function EVChargingCalculator() {
 
       // 2. Fetch Range Scenarios
       try {
-        const scenarioRes = db.exec(`SELECT scenario_name, range_km FROM range_scenarios WHERE vehicle_id = '${selectedVariant}'`);
+        const scenarioRes = safeExec(db, "SELECT scenario_name, range_km FROM range_scenarios WHERE vehicle_id = :vid", { ':vid': selectedVariant });
         let scenarios = [];
         if (scenarioRes.length > 0 && scenarioRes[0].values.length > 0) {
             scenarios = scenarioRes[0].values.map(row => ({
@@ -1178,13 +1199,13 @@ export default function EVChargingCalculator() {
     const randomMake = makes[Math.floor(Math.random() * makes.length)];
     
     // Get models for this make
-    const res = db.exec(`SELECT DISTINCT model FROM vehicles WHERE make = '${randomMake}' ORDER BY model ASC`);
+    const res = safeExec(db, "SELECT DISTINCT model FROM vehicles WHERE make = :make ORDER BY model ASC", { ':make': randomMake });
     if (res.length > 0) {
       const modelsList = res[0].values.map(v => v[0]);
       const randomModel = modelsList[Math.floor(Math.random() * modelsList.length)];
       
       // Get variants for this model
-      const varRes = db.exec(`SELECT id, variant FROM vehicles WHERE make = '${randomMake}' AND model = '${randomModel}'`);
+      const varRes = safeExec(db, "SELECT id, variant FROM vehicles WHERE make = :make AND model = :model", { ':make': randomMake, ':model': randomModel });
       if (varRes.length > 0) {
         const variantsList = varRes[0].values.map(v => ({ id: v[0], name: v[1] }));
         const randomVariant = variantsList[Math.floor(Math.random() * variantsList.length)];
@@ -1337,7 +1358,7 @@ export default function EVChargingCalculator() {
           return;
         } else if (includedCountries.length < availableCountries.length) {
           // Subset of countries selected - apply filter
-          const countriesStr = includedCountries.map(c => `'${c}'`).join(',');
+          const countriesStr = includedCountries.map(c => sanitizeForIn(c)).map(c => `'${c}'`).join(',');
           countryFilter = `AND v.country IN (${countriesStr})`;
           console.log('Country filter applied:', countryFilter);
         } else {
@@ -1355,7 +1376,7 @@ export default function EVChargingCalculator() {
           return;
         } else if (selectedVehicleMakes.length < availableVehicleMakes.length) {
           // Subset of makes selected - apply filter
-          const makesStr = selectedVehicleMakes.map(m => `'${m}'`).join(',');
+          const makesStr = selectedVehicleMakes.map(m => sanitizeForIn(m)).map(m => `'${m}'`).join(',');
           makesFilter = `AND v.make IN (${makesStr})`;
           console.log('Vehicle makes filter applied:', makesFilter);
         } else {
@@ -1374,8 +1395,8 @@ export default function EVChargingCalculator() {
                  ) as battery_usable,
                  v.country, v.battery_configuration, v.drag_coefficient
           FROM vehicles v
-          WHERE v.battery_net_kwh >= ${minBatteryCapacity}
-          AND v.battery_net_kwh <= ${maxBatteryCapacity}
+          WHERE v.battery_net_kwh >= ${Number(minBatteryCapacity) || 0}
+          AND v.battery_net_kwh <= ${Number(maxBatteryCapacity) || 999}
           AND v.id IN (SELECT DISTINCT vehicle_id FROM charging_curve)
           ${countryFilter}
           ${makesFilter}
@@ -1402,8 +1423,8 @@ export default function EVChargingCalculator() {
         console.log('Total vehicles found:', vehicles.length);
 
         // Batch query for ranges to reduce queries
-        const vehicleIds = vehicles.map(v => `'${v.id}'`).join(',');
-        const scenarioFilter = leaderboardSelectedScenario ? `AND scenario_name = '${leaderboardSelectedScenario}'` : '';
+        const vehicleIds = vehicles.map(v => `'${Number(v.id)}'`).join(',');
+        const scenarioFilter = leaderboardSelectedScenario ? `AND scenario_name = '${sanitizeForIn(leaderboardSelectedScenario)}'` : '';
         const rangesRes = db.exec(`
           SELECT vehicle_id, range_km 
           FROM range_scenarios 
@@ -1432,12 +1453,7 @@ export default function EVChargingCalculator() {
         // Calculate metrics for database vehicles
         const results = vehicles.map(vehicle => {
           // Get charging curve
-          const curveRes = db.exec(`
-            SELECT soc_percent, power_kw 
-            FROM charging_curve 
-            WHERE vehicle_id = '${vehicle.id}' 
-            ORDER BY soc_percent ASC
-          `);
+          const curveRes = safeExec(db, "SELECT soc_percent, power_kw FROM charging_curve WHERE vehicle_id = :vid ORDER BY soc_percent ASC", { ':vid': vehicle.id });
 
           if (!curveRes.length || !curveRes[0].values.length) return null;
 

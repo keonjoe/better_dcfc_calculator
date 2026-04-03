@@ -65,13 +65,16 @@ describe('App Component', () => {
     expect(darkModeButton).toBeInTheDocument();
   });
 
-  it('clears localStorage on beforeunload', () => {
+  it('clears app-specific localStorage keys on beforeunload', () => {
     renderApp();
     
     // Trigger beforeunload event
     window.dispatchEvent(new Event('beforeunload'));
     
-    expect(localStorage.clear).toHaveBeenCalled();
+    expect(localStorage.removeItem).toHaveBeenCalledWith('lifetimeCostInputs');
+    expect(localStorage.removeItem).toHaveBeenCalledWith('maintenanceItems');
+    expect(localStorage.removeItem).toHaveBeenCalledWith('comparisonScenarios');
+    expect(localStorage.removeItem).toHaveBeenCalledWith('customLeaderboardVehicles');
   });
 
   it('starts with dark mode enabled by default', () => {
