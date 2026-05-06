@@ -3,6 +3,11 @@ from bs4 import BeautifulSoup
 import sqlite3
 import time
 import re
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from urllib.parse import urljoin
 import urllib3
 
@@ -14,14 +19,45 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # Configuration
 BASE_URL = "https://evkx.net/models/"
 DB_NAME = "ev_data.db"
+MAX_WORKERS = max(1, int(os.getenv("EVKX_SCRAPER_WORKERS", "8")))
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
 
+_thread_local = threading.local()
+_html_cache = {}
+_cache_lock = threading.Lock()
+
+
+def get_http_session():
+    """Returns a thread-local requests session with connection pooling and retries."""
+    session = getattr(_thread_local, "session", None)
+    if session is None:
+        session = requests.Session()
+        retries = Retry(
+            total=3,
+            backoff_factor=0.4,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=("GET",),
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(
+            pool_connections=MAX_WORKERS * 2,
+            pool_maxsize=MAX_WORKERS * 4,
+            max_retries=retries,
+        )
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        _thread_local.session = session
+    return session
+
 def setup_database():
     """Creates the SQLite database and necessary tables."""
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=60)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=60000")
     
     # Table for Vehicle Variants
     cursor.execute('''
@@ -123,10 +159,18 @@ def setup_database():
 
 def get_soup(url):
     """Fetches a URL and returns a BeautifulSoup object."""
+    with _cache_lock:
+        cached = _html_cache.get(url)
+    if cached is not None:
+        return BeautifulSoup(cached, 'html.parser')
+
     try:
+        session = get_http_session()
         # verify=False bypasses the SSL error
-        response = requests.get(url, headers=HEADERS, timeout=20, verify=False)
+        response = session.get(url, headers=HEADERS, timeout=20, verify=False)
         response.raise_for_status()
+        with _cache_lock:
+            _html_cache[url] = response.content
         return BeautifulSoup(response.content, 'html.parser')
     except requests.RequestException as e:
         print(f"Error fetching {url}: {e}")
@@ -166,8 +210,7 @@ def scrape_makes():
             if full_url not in [m['url'] for m in makes] and make_name:
                 makes.append({'name': make_name, 'url': full_url, 'country': None})
 
-    # Extract country information and proper capitalization from flag images on each make page
-    for make in makes:
+    def enrich_make(make):
         make_soup = get_soup(make['url'])
         if make_soup:
             # Look for the proper capitalized make name in the h1 heading
@@ -191,6 +234,11 @@ def scrape_makes():
             
             if flag_img and flag_img.get('title'):
                 make['country'] = flag_img.get('title').strip().upper()
+        return make
+
+    # Enrich make metadata in parallel; this stage is network-bound.
+    with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, max(1, len(makes)))) as executor:
+        makes = list(executor.map(enrich_make, makes))
     
     return list({v['url']: v for v in makes}.values())[:-1]
 
@@ -250,18 +298,16 @@ def scrape_variants(model_url):
                 
     return variants
 
-def detect_battery_configurations(variant_url):
+def detect_battery_configurations(charging_curve_soup):
     """Detects if a variant has multiple battery configurations and returns their details."""
-    url = urljoin(variant_url, "chargingcurve/")
-    soup = get_soup(url)
-    if not soup:
+    if not charging_curve_soup:
         return []
     
     battery_configs = []
     
     # Look for battery configuration headers (e.g., "105.0 kWh — Performance Battery Plus (Configuration 1)")
     # These are typically h2 or h3 headings
-    for heading in soup.find_all(['h2', 'h3']):
+    for heading in charging_curve_soup.find_all(['h2', 'h3']):
         heading_text = heading.get_text().strip()
         # Match pattern: "XX.X kWh — Battery Name (Configuration N)"
         match = re.search(r'([\d.]+)\s*kwh\s*[—–-]\s*(.+?)(?:\s*\(configuration\s*\d+\))?$', heading_text, re.IGNORECASE)
@@ -276,10 +322,13 @@ def detect_battery_configurations(variant_url):
     
     return battery_configs
 
-def parse_charging_curve(variant_url, vehicle_id, cursor, battery_config=None):
+def parse_charging_curve(variant_url, vehicle_id, cursor, battery_config=None, charging_curve_soup=None):
     """Fetches and parses the charging curve table for a specific battery configuration."""
-    url = urljoin(variant_url, "chargingcurve/")
-    soup = get_soup(url)
+    if charging_curve_soup is None:
+        url = urljoin(variant_url, "chargingcurve/")
+        soup = get_soup(url)
+    else:
+        soup = charging_curve_soup
     if not soup:
         return
 
@@ -448,8 +497,16 @@ def scrape_variant_details(variant_url, make, model, variant_name, country, curs
     """Main function to process a specific variant."""
     print(f"Processing: {make} {model} - {variant_name}")
     
+    specs_url = urljoin(variant_url, "specifications/")
+    specs_soup = get_soup(specs_url)
+    if not specs_soup:
+        return
+
+    charging_curve_url = urljoin(variant_url, "chargingcurve/")
+    charging_curve_soup = get_soup(charging_curve_url)
+
     # Check for multiple battery configurations
-    battery_configs = detect_battery_configurations(variant_url)
+    battery_configs = detect_battery_configurations(charging_curve_soup)
     
     if battery_configs:
         print(f"  Found {len(battery_configs)} battery configurations")
@@ -458,16 +515,37 @@ def scrape_variant_details(variant_url, make, model, variant_name, country, curs
             # Append battery capacity to variant name
             battery_variant_name = f"{variant_name} ({battery_config['kwh']}kWh)"
             print(f"  Processing battery variant: {battery_variant_name}")
-            scrape_single_variant(variant_url, make, model, battery_variant_name, country, cursor, conn, battery_config)
+            scrape_single_variant(
+                variant_url,
+                make,
+                model,
+                battery_variant_name,
+                country,
+                cursor,
+                conn,
+                battery_config,
+                specs_soup,
+                charging_curve_soup,
+            )
     else:
         # No battery configurations found, process normally
-        scrape_single_variant(variant_url, make, model, variant_name, country, cursor, conn, None)
+        scrape_single_variant(
+            variant_url,
+            make,
+            model,
+            variant_name,
+            country,
+            cursor,
+            conn,
+            None,
+            specs_soup,
+            charging_curve_soup,
+        )
 
-def scrape_single_variant(variant_url, make, model, variant_name, country, cursor, conn, battery_config=None):
+def scrape_single_variant(variant_url, make, model, variant_name, country, cursor, conn, battery_config=None, specs_soup=None, charging_curve_soup=None):
     """Process a single variant (or battery configuration variant)."""
     # Get specifications page
-    specs_url = urljoin(variant_url, "specifications/")
-    soup = get_soup(specs_url)
+    soup = specs_soup if specs_soup is not None else get_soup(urljoin(variant_url, "specifications/"))
     if not soup:
         return
 
@@ -672,7 +750,7 @@ def scrape_single_variant(variant_url, make, model, variant_name, country, curso
         ''', (battery_config['kwh'], vehicle_id))
 
     # 2. Details
-    parse_charging_curve(variant_url, vehicle_id, cursor, battery_config)
+    parse_charging_curve(variant_url, vehicle_id, cursor, battery_config, charging_curve_soup)
     parse_range_data(variant_url, vehicle_id, cursor)
 
     conn.commit()
@@ -686,6 +764,7 @@ def main():
     makes = scrape_makes()
     print(f"Found {len(makes)} makes.")
     
+    jobs = []
     for make in makes:
         print(f"Scraping Make: {make['name']} ({make.get('country', 'Unknown')})")
         models = scrape_models(make['url'])
@@ -695,12 +774,41 @@ def main():
             
             if not variants:
                 # Sometimes the model page IS the variant page
-                scrape_variant_details(model['url'], make['name'], model['name'], model['name'], make.get('country'), cursor, conn)
+                jobs.append((model['url'], make['name'], model['name'], model['name'], make.get('country')))
             else:
                 for variant in variants:
-                    scrape_variant_details(variant['url'], make['name'], model['name'], variant['name'], make.get('country'), cursor, conn)
-        
+                    jobs.append((variant['url'], make['name'], model['name'], variant['name'], make.get('country')))
+
     conn.close()
+
+    print(f"Queued {len(jobs)} variants. Processing with {MAX_WORKERS} workers...")
+
+    def process_variant_job(job):
+        variant_url, make_name, model_name, variant_name, country = job
+        local_conn = sqlite3.connect(DB_NAME, timeout=60)
+        local_cursor = local_conn.cursor()
+        local_cursor.execute("PRAGMA busy_timeout=60000")
+        try:
+            scrape_variant_details(variant_url, make_name, model_name, variant_name, country, local_cursor, local_conn)
+            return (variant_url, None)
+        except Exception as exc:
+            return (variant_url, str(exc))
+        finally:
+            local_conn.close()
+
+    failures = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(process_variant_job, job) for job in jobs]
+        for future in as_completed(futures):
+            variant_url, error = future.result()
+            if error:
+                failures.append((variant_url, error))
+
+    if failures:
+        print(f"Completed with {len(failures)} failures:")
+        for variant_url, error in failures[:25]:
+            print(f"  - {variant_url}: {error}")
+
     print("Scraping complete. Data saved to ev_data.db")
 
 if __name__ == "__main__":
