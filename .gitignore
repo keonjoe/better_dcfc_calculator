@@ -47,8 +47,9 @@ coverage
 .idea/
 *.iml
 .DS_Store
-ev-calculator/package-lock.json
-ev-calculator/package-lock.json
 ev-calculator/.env.example
 ev_data.db
 *.pyc
+test_*.py
+demo_*.py
+*.json
