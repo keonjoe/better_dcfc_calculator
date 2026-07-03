@@ -11,8 +11,3 @@ Preview the project locally:
 ```
 npm run preview
 ```
-Refresh database:
-```
-python evkx_scraper.py
-```
-Be sure to copy/paste the .db file generated to ev-calculator/public
