@@ -178,6 +178,70 @@ describe('EVChargingCalculator Component', () => {
     });
   });
 
+  it('offers a current limit toggle that reveals the current inputs', async () => {
+    const user = userEvent.setup();
+    renderWithProviders();
+
+    const toggle = screen.getByLabelText(/limit by current/i);
+    expect(toggle).toBeInTheDocument();
+    expect(screen.queryByText(/initial current/i)).not.toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(screen.getAllByText(/initial current/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/derated current/i)).toBeInTheDocument();
+    expect(screen.getByText(/derate after/i)).toBeInTheDocument();
+
+    // Defaults: 600 A dropping to 400 A after 10 minutes
+    expect(screen.getByLabelText('Initial Current')).toHaveValue(600);
+    expect(screen.getByLabelText('Derated Current')).toHaveValue(400);
+    expect(screen.getByText(/^10 min$/)).toBeInTheDocument();
+  });
+
+  it('toggles the chart x axis between SoC and time', async () => {
+    const user = userEvent.setup();
+    renderWithProviders();
+
+    const timeButton = screen.getByRole('button', { name: /^time$/i });
+    const socButton = screen.getByRole('button', { name: /^soc$/i });
+    expect(timeButton).toBeInTheDocument();
+
+    await user.click(timeButton);
+    await user.click(socButton);
+
+    // Still rendering after switching axes
+    expect(screen.getByRole('heading', { name: /^Charging Session$/i })).toBeInTheDocument();
+  });
+
+  it('defaults the y axis to power and disables current without pack data', () => {
+    renderWithProviders();
+
+    const powerButton = screen.getByRole('button', { name: /^power$/i });
+    const currentButton = screen.getByRole('button', { name: /^current$/i });
+
+    // Power is the selected default
+    expect(powerButton.className).toMatch(/bg-white/);
+    // No database in this test, so there is no voltage model to plot amps from
+    expect(currentButton).toBeDisabled();
+  });
+
+  it('exposes the highest charging current leaderboard metric and current filter', async () => {
+    const user = userEvent.setup();
+    renderWithProviders();
+
+    await user.click(screen.getByRole('button', { name: /leaderboards/i }));
+
+    expect(screen.getByRole('option', { name: /highest charging current/i })).toBeInTheDocument();
+
+    const currentToggle = screen.getByLabelText(/charger maximum current/i);
+    expect(currentToggle).toBeInTheDocument();
+    expect(screen.queryByText(/^1000 A$/)).not.toBeInTheDocument();
+
+    await user.click(currentToggle);
+    expect(screen.getByText(/^1000 A$/)).toBeInTheDocument();
+    expect(screen.getByText(/^500 A$/)).toBeInTheDocument();
+  });
+
   it('renders input controls as disabled when appropriate', () => {
     renderWithProviders();
     

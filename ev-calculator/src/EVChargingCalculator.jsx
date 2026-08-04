@@ -1,7 +1,8 @@
-import { useState, useMemo, useEffect, useRef, useContext } from 'react';
-import { Battery, Zap, Clock, MapPin, Settings, Database, ChevronDown, List, Loader2, Edit3, X, Linkedin, Globe, BarChart3, BookOpen } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef, useContext, useId } from 'react';
+import { Battery, Zap, Clock, MapPin, Settings, Database, ChevronDown, List, Loader2, Edit3, X, Linkedin, Globe, BarChart3, BookOpen, Activity } from 'lucide-react';
 import { DarkModeContext } from './App';
 import SEO from './SEO';
+import { buildVoltageModel, makeCurrentLimiter, simulateCharge } from './batteryModel';
 
 const Card = ({ children, className = "" }) => (
   <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 ${className}`}>
@@ -33,6 +34,7 @@ const InputGroup = ({ label, value, onChange, min, max, step = 1, unit, subtext,
 );
 
 const NumberInput = ({ label, value, onChange, unit, disabled }) => {
+  const inputId = useId();
   const [inputValue, setInputValue] = useState(String(value ?? ''));
   useEffect(() => {
     setInputValue(String(value ?? ''));
@@ -45,9 +47,10 @@ const NumberInput = ({ label, value, onChange, unit, disabled }) => {
 
   return (
     <div className={`flex flex-col ${disabled ? 'opacity-60 pointer-events-none' : ''}`}>
-      {label && <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{label}</label>}
+      {label && <label htmlFor={inputId} className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{label}</label>}
       <div className="relative">
         <input
+          id={inputId}
           type="number"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
@@ -156,7 +159,7 @@ const CompactCurvePreview = ({ curveData, startSoc, stopSoc, chargerMaxPower, da
   );
 };
 
-const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, darkMode, isCustomMode, onCurveEdit, editedPoints, setEditedPoints, onClearEdits }) => {
+const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, darkMode, isCustomMode, onCurveEdit, editedPoints, setEditedPoints, onClearEdits, simulation, currentLimiter, xAxis = 'soc', yAxis = 'power' }) => {
   const width = 600;
   const height = 300;
   const padding = { top: 20, right: 30, bottom: 40, left: 50 };
@@ -165,6 +168,8 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
   const svgRef = useRef(null);
   const [tooltip, setTooltip] = useState(null);
   const [draggedPointIndex, setDraggedPointIndex] = useState(null);
+  const timeMode = xAxis === 'time';
+  const powerMode = yAxis !== 'current';
 
   // Theme colors
   const theme = {
@@ -179,16 +184,107 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
   // Safe data check
   const safeCurveData = Array.isArray(curveData) ? curveData : [];
 
-  // Determine Max Scale with Rounding
-  const dataMax = safeCurveData.length > 0 ? Math.max(...safeCurveData.map(d => d.kw)) : 0;
-  const scalingBase = Math.max(dataMax, chargerMaxPower + 100);
-  const maxKw = Math.ceil(scalingBase / 100) * 100;
-  
-  // Generate 5 evenly spaced ticks (0 to 5)
-  const yTicks = [0, 1, 2, 3, 4, 5].map(i => Math.round(i * (maxKw / 5)));
+  // Simulated detail per curve point (power after every limit, voltage, current,
+  // and time since the start of the charge). Falls back to a charger-only cap.
+  const series = useMemo(() => {
+    const simPoints = simulation?.points;
+    return safeCurveData.map((p, i) => {
+      const sim = simPoints && simPoints[i] && simPoints[i].soc === p.soc ? simPoints[i] : null;
+      return {
+        soc: p.soc,
+        idealKw: p.kw,
+        realKw: sim ? sim.realKw : Math.min(p.kw, chargerMaxPower),
+        idealCurrentA: sim ? sim.idealCurrentA : null,
+        voltageV: sim ? sim.voltageV : null,
+        openCircuitV: sim ? sim.openCircuitV : null,
+        currentA: sim ? sim.currentA : null,
+        currentLimitKw: sim ? sim.currentLimitKw : null,
+        timeMin: sim ? sim.timeMin : null,
+      };
+    });
+  }, [safeCurveData, simulation, chargerMaxPower]);
 
-  const xScale = (soc) => padding.left + (soc / 100) * graphWidth;
-  const yScale = (kw) => height - padding.bottom - (kw / maxKw) * graphHeight;
+  // Session-only slice used when the x axis is time. Clipped at the stop SoC so
+  // the time axis covers exactly the session the user selected.
+  const timeSeries = useMemo(
+    () => series.filter(p => p.timeMin != null && p.soc <= stopSoc),
+    [series, stopSoc]
+  );
+  const maxTimeMin = timeSeries.length ? timeSeries[timeSeries.length - 1].timeMin : 0;
+  const timeAvailable = timeMode && timeSeries.length > 1 && maxTimeMin > 0;
+  const plotSeries = timeAvailable ? timeSeries : series;
+
+  // Re-express every plotted point in the active y unit, together with the two
+  // ceilings: the station's power limit and the charging current limit.
+  const plotted = useMemo(() => plotSeries.map(p => {
+    if (powerMode) {
+      return {
+        ...p,
+        ideal: p.idealKw,
+        real: p.realKw,
+        chargerLimit: chargerMaxPower,
+        currentLimit: Number.isFinite(p.currentLimitKw) ? p.currentLimitKw : null,
+      };
+    }
+    // Amps per kW at this point, used to project the station power limit onto
+    // the current axis.
+    const ampsPerKw = (Number.isFinite(p.currentA) && p.realKw > 0) ? p.currentA / p.realKw : null;
+    return {
+      ...p,
+      ideal: p.idealCurrentA,
+      real: p.currentA,
+      chargerLimit: ampsPerKw != null ? chargerMaxPower * ampsPerKw : null,
+      currentLimit: currentLimiter ? currentLimiter.limitAt(p.timeMin == null ? 0 : p.timeMin) : null,
+    };
+  }), [plotSeries, powerMode, chargerMaxPower, currentLimiter]);
+
+  const hasPlotValues = plotted.some(p => Number.isFinite(p.real));
+  // Only draw the current-limit ceiling when it actually bites somewhere.
+  const showCurrentLimit = plotted.some(p => Number.isFinite(p.currentLimit)) &&
+    (!powerMode || plotted.some(p => Number.isFinite(p.currentLimit) && p.currentLimit < chargerMaxPower));
+
+  // Determine Max Scale with Rounding
+  const yUnit = powerMode ? 'kW' : 'A';
+  const yStep = 100;
+  const dataMax = hasPlotValues
+    ? Math.max(...plotted.filter(p => Number.isFinite(p.ideal)).map(p => p.ideal), 0)
+    : 0;
+  const ceilingMax = powerMode
+    ? chargerMaxPower + 100
+    : Math.max(...plotted.filter(p => Number.isFinite(p.chargerLimit)).map(p => p.chargerLimit), 0);
+  const scalingBase = Math.max(dataMax, ceilingMax, yStep);
+  const maxY = Math.ceil(scalingBase / yStep) * yStep;
+
+  // Power scale kept separately so curve dragging still works in amps view.
+  const curveMax = safeCurveData.length > 0 ? Math.max(...safeCurveData.map(d => d.kw)) : 0;
+  const maxKw = Math.ceil(Math.max(curveMax, chargerMaxPower + 100) / 100) * 100;
+
+  // Generate 5 evenly spaced ticks (0 to 5)
+  const yTicks = [0, 1, 2, 3, 4, 5].map(i => Math.round(i * (maxY / 5)));
+
+  // X axis domain: SoC percent, or minutes since the start of the charge.
+  const xMax = timeAvailable ? maxTimeMin : 100;
+  const xScale = (v) => padding.left + (xMax > 0 ? (v / xMax) : 0) * graphWidth;
+  const yScale = (v) => height - padding.bottom - (v / maxY) * graphHeight;
+  // Power positions for the draggable points, which always work in kW.
+  const yScaleKw = (kw) => height - padding.bottom - (kw / maxKw) * graphHeight;
+  const xOf = (p) => (timeAvailable ? p.timeMin : p.soc);
+
+  const formatMinutes = (mins) => {
+    if (mins == null || !Number.isFinite(mins)) return '--';
+    const total = Math.round(mins * 60);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${m}m ${String(s).padStart(2, '0')}s`;
+  };
+
+  const xTicks = useMemo(() => {
+    if (!timeAvailable) return [0, 25, 50, 75, 100].map(v => ({ v, label: `${v}%` }));
+    return [0, 1, 2, 3, 4].map(i => {
+      const v = (i * xMax) / 4;
+      return { v, label: formatMinutes(v) };
+    });
+  }, [timeAvailable, xMax]);
 
   // Helper to interpolate curve values correctly on the chart logic
   const getKwAt = (s) => {
@@ -196,106 +292,147 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
     // exact match
     const p = safeCurveData.find(d => d.soc === s);
     if (p) return p.kw;
-    
+
     // Find neighbors for interpolation
     let lower = safeCurveData[0];
     let upper = safeCurveData[safeCurveData.length - 1];
-    
+
     for (let i = 0; i < safeCurveData.length; i++) {
         if (safeCurveData[i].soc <= s) lower = safeCurveData[i];
         if (safeCurveData[i].soc >= s && upper === safeCurveData[safeCurveData.length - 1]) {
             upper = safeCurveData[i];
-            break; 
+            break;
         }
     }
-    
+
     if (lower.soc === upper.soc) return lower.kw;
-    
+
     // Linear interpolation
     return lower.kw + (upper.kw - lower.kw) * ((s - lower.soc) / (upper.soc - lower.soc));
   };
 
-  // Generate Path for Car's Curve
-  const carCurvePath = useMemo(() => {
-    if (safeCurveData.length === 0) return "";
-    const firstPoint = safeCurveData[0];
-    let d = `M ${xScale(firstPoint.soc)} ${yScale(firstPoint.kw)}`;
-    safeCurveData.slice(1).forEach(p => {
-      d += ` L ${xScale(p.soc)} ${yScale(p.kw)}`;
-    });
-    return d;
-  }, [safeCurveData, maxKw]);
+  // Interpolate any per-point field at an arbitrary SoC using `series`.
+  const sampleAt = (soc, key) => {
+    if (series.length === 0) return null;
+    const exact = series.find(p => p.soc === soc);
+    if (exact) return exact[key];
+    const lower = series.filter(p => p.soc < soc).pop();
+    const upper = series.find(p => p.soc > soc);
+    if (!lower) return upper ? upper[key] : null;
+    if (!upper) return lower[key];
+    if (lower[key] == null || upper[key] == null) return lower[key] ?? upper[key];
+    return lower[key] + (upper[key] - lower[key]) * ((soc - lower.soc) / (upper.soc - lower.soc));
+  };
 
-  // Generate Path for Actual Charging (Limited by Charger)
-  const actualCurvePoints = useMemo(() => {
-      return safeCurveData.map(p => ({
-        soc: p.soc,
-        kw: Math.min(p.kw, chargerMaxPower)
-      }));
-  }, [safeCurveData, chargerMaxPower]);
-  
-  const actualCurvePath = useMemo(() => {
-    if (actualCurvePoints.length === 0) return "";
-    const firstPoint = actualCurvePoints[0];
-    let d = `M ${xScale(firstPoint.soc)} ${yScale(firstPoint.kw)}`;
-    actualCurvePoints.slice(1).forEach(p => {
-      d += ` L ${xScale(p.soc)} ${yScale(p.kw)}`;
+  // Invert the time axis back to a SoC so the tooltip can report both.
+  const socAtTime = (t) => {
+    if (timeSeries.length === 0) return 0;
+    if (t <= timeSeries[0].timeMin) return timeSeries[0].soc;
+    for (let i = 0; i < timeSeries.length - 1; i++) {
+      const a = timeSeries[i];
+      const b = timeSeries[i + 1];
+      if (t >= a.timeMin && t <= b.timeMin) {
+        if (b.timeMin === a.timeMin) return a.soc;
+        return a.soc + (b.soc - a.soc) * ((t - a.timeMin) / (b.timeMin - a.timeMin));
+      }
+    }
+    return timeSeries[timeSeries.length - 1].soc;
+  };
+
+  const buildPath = (points, valueKey) => {
+    const usable = points.filter(p => Number.isFinite(p[valueKey]));
+    if (usable.length === 0) return "";
+    let d = `M ${xScale(xOf(usable[0]))} ${yScale(usable[0][valueKey])}`;
+    usable.slice(1).forEach(p => {
+      d += ` L ${xScale(xOf(p))} ${yScale(p[valueKey])}`;
     });
     return d;
-  }, [actualCurvePoints, maxKw]);
+  };
+
+  // Path building is a cheap string walk over at most ~100 points, so these
+  // are recomputed on every render rather than memoised.
+  const carCurvePath = buildPath(plotted, 'ideal');
+  const actualCurvePath = buildPath(plotted, 'real');
+
+  // The two ceilings. In power view the station limit is flat and the current
+  // limit is a curve (it tracks pack voltage); in current view it is the other
+  // way round.
+  const chargerLimitPath = buildPath(plotted, 'chargerLimit');
+  const currentLimitPath = showCurrentLimit ? buildPath(plotted, 'currentLimit') : "";
+
+  // Session boundaries expressed in the current x domain.
+  const xStart = timeAvailable ? 0 : startSoc;
+  const xStop = timeAvailable ? Math.max(0, Math.min(sampleAt(stopSoc, 'timeMin') ?? maxTimeMin, xMax)) : stopSoc;
+
+  const realAt = (soc) => {
+    const key = powerMode ? 'realKw' : 'currentA';
+    const value = sampleAt(soc, key);
+    if (Number.isFinite(value)) return value;
+    return powerMode ? Math.min(getKwAt(soc), chargerMaxPower) : null;
+  };
 
   // Active Charging Area
-  const activeAreaPath = useMemo(() => {
-    if (safeCurveData.length === 0) return "";
-    
-    // Filter points that strictly fall inside the range
-    const innerPoints = actualCurvePoints.filter(p => p.soc > startSoc && p.soc < stopSoc);
-    
-    // Calculate start and end points interpolated
-    const startKw = Math.min(getKwAt(startSoc), chargerMaxPower);
-    const stopKw = Math.min(getKwAt(stopSoc), chargerMaxPower);
+  const activeAreaPath = (() => {
+    if (plotted.length === 0) return "";
 
-    let d = `M ${xScale(startSoc)} ${height - padding.bottom}`; // Bottom Left
-    d += ` L ${xScale(startSoc)} ${yScale(startKw)}`; // Top Left (interpolated)
+    const startValue = realAt(startSoc);
+    const stopValue = realAt(stopSoc);
+    if (!Number.isFinite(startValue) || !Number.isFinite(stopValue)) return "";
 
-    // Add all actual curve points in between
+    const innerPoints = plotted.filter(p => p.soc > startSoc && p.soc < stopSoc && Number.isFinite(p.real));
+
+    let d = `M ${xScale(xStart)} ${height - padding.bottom}`; // Bottom Left
+    d += ` L ${xScale(xStart)} ${yScale(startValue)}`; // Top Left (interpolated)
+
     innerPoints.forEach(p => {
-      d += ` L ${xScale(p.soc)} ${yScale(p.kw)}`;
+      d += ` L ${xScale(xOf(p))} ${yScale(p.real)}`;
     });
 
-    d += ` L ${xScale(stopSoc)} ${yScale(stopKw)}`; // Top Right (interpolated)
-    d += ` L ${xScale(stopSoc)} ${height - padding.bottom}`; // Bottom Right
+    d += ` L ${xScale(xStop)} ${yScale(stopValue)}`; // Top Right (interpolated)
+    d += ` L ${xScale(xStop)} ${height - padding.bottom}`; // Bottom Right
     d += " Z"; // Close
 
     return d;
-  }, [actualCurvePoints, startSoc, stopSoc, safeCurveData, chargerMaxPower, maxKw]);
+  })();
 
   const handleMouseMove = (e) => {
     if (!svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
-    
+
     // Convert pixel coordinates to SVG viewBox coordinates
     const svgX = (mouseX / rect.width) * width;
-    
+
     // Check bounds to ensure we are within graph area (using SVG coordinates)
     if (svgX < padding.left || svgX > width - padding.right) {
         setTooltip(null);
         return;
     }
 
-    const socRaw = ((svgX - padding.left) / graphWidth) * 100;
-    const soc = Math.max(0, Math.min(100, socRaw));
+    const domainRaw = ((svgX - padding.left) / graphWidth) * xMax;
+    const domainVal = Math.max(0, Math.min(xMax, domainRaw));
+    const soc = timeAvailable ? socAtTime(domainVal) : domainVal;
+
     const idealKw = getKwAt(soc);
-    const realKw = Math.min(idealKw, chargerMaxPower);
-    
+    const realKw = sampleAt(soc, 'realKw') ?? Math.min(idealKw, chargerMaxPower);
+    const timeMin = timeAvailable ? domainVal : sampleAt(soc, 'timeMin');
+    const idealCurrentA = sampleAt(soc, 'idealCurrentA');
+    const currentA = sampleAt(soc, 'currentA');
+
+    const idealPlot = powerMode ? idealKw : idealCurrentA;
+    const realPlot = powerMode ? realKw : currentA;
+
     setTooltip({
         x: svgX,
-        yReal: yScale(realKw),
-        yIdeal: yScale(idealKw),
-        soc: soc,
-        idealKw: idealKw,
-        realKw: realKw
+        yReal: Number.isFinite(realPlot) ? yScale(realPlot) : yScale(0),
+        yIdeal: Number.isFinite(idealPlot) ? yScale(idealPlot) : yScale(0),
+        soc,
+        idealKw,
+        realKw,
+        timeMin,
+        voltageV: sampleAt(soc, 'voltageV'),
+        openCircuitV: sampleAt(soc, 'openCircuitV'),
+        currentA,
     });
   };
 
@@ -337,7 +474,7 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
   };
 
   const handlePointDrag = (e) => {
-    if (!isCustomMode || draggedPointIndex === null) return;
+    if (!isCustomMode || !powerMode || draggedPointIndex === null) return;
     if (!svgRef.current) return;
     
     const rect = svgRef.current.getBoundingClientRect();
@@ -378,14 +515,14 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
       >
-        {[0, 25, 50, 75, 100].map(tick => (
-          <g key={`x-${tick}`} pointerEvents="none">
-            <line 
-              x1={xScale(tick)} y1={padding.top} 
-              x2={xScale(tick)} y2={height - padding.bottom} 
-              stroke={theme.grid} strokeDasharray="4 4" strokeWidth="1" 
+        {xTicks.map(tick => (
+          <g key={`x-${tick.v}`} pointerEvents="none">
+            <line
+              x1={xScale(tick.v)} y1={padding.top}
+              x2={xScale(tick.v)} y2={height - padding.bottom}
+              stroke={theme.grid} strokeDasharray="4 4" strokeWidth="1"
             />
-            <text x={xScale(tick)} y={height - 15} textAnchor="middle" fill={theme.text} fontSize="12">{tick}%</text>
+            <text x={xScale(tick.v)} y={height - 15} textAnchor="middle" fill={theme.text} fontSize="12">{tick.label}</text>
           </g>
         ))}
         {/* Dynamic Y Scale */}
@@ -399,42 +536,76 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
             <text x={padding.left - 10} y={yScale(tick) + 4} textAnchor="end" fill={theme.text} fontSize="12">{tick}</text>
           </g>
         ))}
-        <line pointerEvents="none" x1={padding.left} y1={yScale(chargerMaxPower)} x2={width - padding.right} y2={yScale(chargerMaxPower)} stroke="#ef4444" strokeWidth="2" strokeDasharray="6 4" opacity="0.6" />
-        <text pointerEvents="none" x={width - padding.right - 10} y={yScale(chargerMaxPower) - 10} fill="#ef4444" textAnchor="end" fontSize="12">Charger Limit ({chargerMaxPower} kW)</text>
+        <text pointerEvents="none" x={padding.left - 10} y={padding.top - 6} textAnchor="end" fill={theme.text} fontSize="11">{yUnit}</text>
+        {/* Station power ceiling: flat in power view, a curve in current view */}
+        <path pointerEvents="none" d={chargerLimitPath} fill="none" stroke="#ef4444" strokeWidth="2" strokeDasharray="6 4" opacity="0.6" />
+        <text pointerEvents="none" x={width - padding.right - 10} y={yScale(plotted.length && Number.isFinite(plotted[plotted.length - 1].chargerLimit) ? plotted[plotted.length - 1].chargerLimit : 0) - 10} fill="#ef4444" textAnchor="end" fontSize="12">
+          Charger Limit ({chargerMaxPower} kW)
+        </text>
+
+        {/* Charging current ceiling, drawn only where it bites */}
+        {showCurrentLimit && (
+          <>
+            <path pointerEvents="none" d={currentLimitPath} fill="none" stroke="#a855f7" strokeWidth="2" strokeDasharray="3 3" opacity="0.8" />
+            <text pointerEvents="none" x={padding.left + 10} y={yScale(plotted.find(p => Number.isFinite(p.currentLimit))?.currentLimit ?? 0) - 8} fill="#a855f7" textAnchor="start" fontSize="11">
+              Current Limit
+            </text>
+          </>
+        )}
+
         <path pointerEvents="none" d={carCurvePath} fill="none" stroke={theme.carCurve} strokeWidth="2" strokeDasharray="4 4" />
         <path pointerEvents="none" d={activeAreaPath} fill="url(#gradient)" stroke="none" opacity="0.8" />
         <path pointerEvents="none" d={actualCurvePath} fill="none" stroke="#3b82f6" strokeWidth="3" />
-        <line pointerEvents="none" x1={xScale(startSoc)} y1={padding.top} x2={xScale(startSoc)} y2={height - padding.bottom} stroke="#10b981" strokeWidth="2" />
-        <line pointerEvents="none" x1={xScale(stopSoc)} y1={padding.top} x2={xScale(stopSoc)} y2={height - padding.bottom} stroke="#f59e0b" strokeWidth="2" />
-        
+        <line pointerEvents="none" x1={xScale(xStart)} y1={padding.top} x2={xScale(xStart)} y2={height - padding.bottom} stroke="#10b981" strokeWidth="2" />
+        <line pointerEvents="none" x1={xScale(xStop)} y1={padding.top} x2={xScale(xStop)} y2={height - padding.bottom} stroke="#f59e0b" strokeWidth="2" />
+
         {/* Tooltip */}
-        {tooltip && (
+        {tooltip && (() => {
+            // SoC and time head the tooltip, then the values being plotted.
+            const headers = [
+              `SoC: ${Math.round(tooltip.soc)}%`,
+              `Time: ${formatMinutes(tooltip.timeMin)}`,
+            ];
+            const rows = [
+              { label: 'Ideal', value: `${Math.round(tooltip.idealKw)} kW`, color: '#94a3b8', size: 12 },
+              { label: 'Real', value: `${Math.round(tooltip.realKw)} kW`, color: '#3b82f6', size: 14 },
+            ];
+            if (Number.isFinite(tooltip.currentA)) rows.push({ label: 'Current', value: `${Math.round(tooltip.currentA)} A`, color: '#f59e0b', size: 12 });
+            if (Number.isFinite(tooltip.voltageV)) rows.push({ label: 'Pack', value: `${Math.round(tooltip.voltageV)} V`, color: theme.tooltipText, size: 11 });
+            const headerHeight = 14 + headers.length * 16;
+            const boxHeight = headerHeight + 10 + rows.length * 18;
+            return (
             <g pointerEvents="none">
                 <line x1={tooltip.x} y1={padding.top} x2={tooltip.x} y2={height - padding.bottom} stroke={theme.text} strokeWidth="1" strokeDasharray="2 2" opacity="0.5" />
                 {/* Ideal circle (behind, gray) */}
                 <circle cx={tooltip.x} cy={tooltip.yIdeal} r="5" fill="#94a3b8" stroke="white" strokeWidth="2" />
                 {/* Real circle (in front, blue) */}
                 <circle cx={tooltip.x} cy={tooltip.yReal} r="5" fill="#3b82f6" stroke="white" strokeWidth="2" />
-                <g transform={`translate(${tooltip.x < width / 2 ? tooltip.x + 15 : tooltip.x - 135}, ${tooltip.yReal < height / 2 ? tooltip.yReal : tooltip.yReal - 85})`}>
-                    <rect width="120" height="75" rx="6" fill={theme.tooltipBg} stroke={theme.grid} strokeWidth="1" filter="drop-shadow(0 4px 6px rgb(0 0 0 / 0.3))" />
-                    <text x="10" y="18" fontSize="11" fill={theme.text} fontWeight="normal">SoC: {Math.round(tooltip.soc)}%</text>
-                    <line x1="10" y1="25" x2="110" y2="25" stroke={theme.grid} strokeWidth="1" />
-                    <text x="10" y="40" fontSize="10" fill={theme.text} fontWeight="normal">Ideal:</text>
-                    <text x="110" y="40" fontSize="12" fill="#94a3b8" fontWeight="bold" textAnchor="end">{Math.round(tooltip.idealKw)} kW</text>
-                    <text x="10" y="60" fontSize="10" fill={theme.text} fontWeight="normal">Real:</text>
-                    <text x="110" y="60" fontSize="14" fill="#3b82f6" fontWeight="bold" textAnchor="end">{Math.round(tooltip.realKw)} kW</text>
+                <g transform={`translate(${tooltip.x < width / 2 ? tooltip.x + 15 : tooltip.x - 145}, ${Math.max(padding.top, Math.min(height - padding.bottom - boxHeight, tooltip.yReal - boxHeight / 2))})`}>
+                    <rect width="130" height={boxHeight} rx="6" fill={theme.tooltipBg} stroke={theme.grid} strokeWidth="1" filter="drop-shadow(0 4px 6px rgb(0 0 0 / 0.3))" />
+                    {headers.map((line, i) => (
+                      <text key={line} x="10" y={18 + i * 16} fontSize="11" fill={theme.text} fontWeight="normal">{line}</text>
+                    ))}
+                    <line x1="10" y1={headerHeight} x2="120" y2={headerHeight} stroke={theme.grid} strokeWidth="1" />
+                    {rows.map((row, i) => (
+                      <g key={row.label}>
+                        <text x="10" y={headerHeight + 17 + i * 18} fontSize="10" fill={theme.text} fontWeight="normal">{row.label}:</text>
+                        <text x="120" y={headerHeight + 17 + i * 18} fontSize={row.size} fill={row.color} fontWeight="bold" textAnchor="end">{row.value}</text>
+                      </g>
+                    ))}
                 </g>
             </g>
-        )}
+            );
+        })()}
 
-        {/* Editable points in custom mode - only show edited points */}
-        {isCustomMode && safeCurveData.map((point, index) => {
+        {/* Editable points in custom mode - only show edited points (SoC axis only) */}
+        {isCustomMode && !timeAvailable && powerMode && safeCurveData.map((point, index) => {
           if (!editedPoints.has(index)) return null;
           return (
             <circle
               key={`point-${index}`}
               cx={xScale(point.soc)}
-              cy={yScale(point.kw)}
+              cy={yScaleKw(point.kw)}
               r="6"
               fill={draggedPointIndex === index ? "#3b82f6" : "#60a5fa"}
               stroke="white"
@@ -446,11 +617,11 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
         })}
 
         {/* Invisible clickable areas for all points in custom mode */}
-        {isCustomMode && safeCurveData.map((point, index) => (
+        {isCustomMode && !timeAvailable && powerMode && safeCurveData.map((point, index) => (
           <circle
             key={`clickarea-${index}`}
             cx={xScale(point.soc)}
-            cy={yScale(point.kw)}
+            cy={yScaleKw(point.kw)}
             r="12"
             fill="transparent"
             className="cursor-ns-resize"
@@ -459,7 +630,7 @@ const ChargingCurveChart = ({ curveData, startSoc, stopSoc, chargerMaxPower, dar
         ))}
 
         {/* Clear Edits Button */}
-        {isCustomMode && editedPoints.size > 0 && (
+        {isCustomMode && !timeAvailable && powerMode && editedPoints.size > 0 && (
           <g>
             <rect
               x={width / 2 - 40}
@@ -557,7 +728,23 @@ export default function EVChargingCalculator() {
   const [startSoc, setStartSoc] = useState(10);
   const [stopSoc, setStopSoc] = useState(80);
   const [dwellTime, setDwellTime] = useState(5); // Default to 5 minutes
-  
+
+  // Battery pack electrical data (used to estimate voltage / current)
+  const [packConfiguration, setPackConfiguration] = useState('');
+  const [nominalVoltageV, setNominalVoltageV] = useState(null);
+  const [cathodeMaterial, setCathodeMaterial] = useState('');
+  const [packGrossKwh, setPackGrossKwh] = useState(null);
+
+  // Charging current limit (optional, with a time based derate)
+  const [limitByCurrent, setLimitByCurrent] = useState(false);
+  const [initialCurrentLimit, setInitialCurrentLimit] = useState(600); // A
+  const [deratedCurrentLimit, setDeratedCurrentLimit] = useState(400); // A
+  const [currentDerateTime, setCurrentDerateTime] = useState(10); // minutes
+
+  // Chart axes: x is 'soc' or 'time', y is 'power' or 'current'
+  const [chartXAxis, setChartXAxis] = useState('soc');
+  const [chartYAxis, setChartYAxis] = useState('power');
+
   // Curve Management
   const [rawDbCurve, setRawDbCurve] = useState([]); // Curve directly from DB
   const [curveMultiplier, setCurveMultiplier] = useState(1.0); // Multiplier for custom mode
@@ -573,10 +760,12 @@ export default function EVChargingCalculator() {
   const [drivingSpeedUnit, setDrivingSpeedUnit] = useState('mph'); // 'mph' or 'kph'
   
   // Leaderboards State
-  const [leaderboardMetric, setLeaderboardMetric] = useState('fastest-charging'); // 'fastest-charging', 'highest-avg-power', 'best-range-per-hour', 'most-efficient', 'speed-efficiency', 'lowest-drag-coefficient'
+  const [leaderboardMetric, setLeaderboardMetric] = useState('fastest-charging'); // 'fastest-charging', 'highest-avg-power', 'highest-charging-current', 'best-range-per-hour', 'most-efficient', 'speed-efficiency', 'lowest-drag-coefficient'
   const [leaderboardStartSoc, setLeaderboardStartSoc] = useState(10);
   const [leaderboardStopSoc, setLeaderboardStopSoc] = useState(80);
   const [leaderboardChargerPower, setLeaderboardChargerPower] = useState(400);
+  const [leaderboardLimitCurrent, setLeaderboardLimitCurrent] = useState(false);
+  const [leaderboardMaxCurrent, setLeaderboardMaxCurrent] = useState(500); // A
   const [leaderboardVehicleCount, setLeaderboardVehicleCount] = useState(10);
   const [leaderboardResults, setLeaderboardResults] = useState([]);
   const [isCalculatingLeaderboard, setIsCalculatingLeaderboard] = useState(false);
@@ -736,6 +925,11 @@ export default function EVChargingCalculator() {
       battery: batterySize,
       curve: curveData,
       range: maxRangeUnit === 'mi' ? maxRange : maxRange * 0.621371, // Store in miles
+      // Keep the pack electrical data so current metrics work on the leaderboard
+      packConfiguration,
+      nominalVoltageV,
+      cathodeMaterial,
+      grossKwh: packGrossKwh,
       isCustom: true,
       customTag: customTagLabel
     };
@@ -988,9 +1182,9 @@ export default function EVChargingCalculator() {
   useEffect(() => {
     if (!db || !selectedModel) return;
     try {
-      const res = safeExec(db, "SELECT id, variant, variant_url, battery_configuration FROM vehicles WHERE make = :make AND model = :model", { ':make': selectedMake, ':model': selectedModel });
+      const res = safeExec(db, "SELECT id, variant, variant_url, battery_configuration, pack_configuration, nominal_voltage_v, cathode_material, battery_gross_kwh FROM vehicles WHERE make = :make AND model = :model", { ':make': selectedMake, ':model': selectedModel });
       if (res.length > 0) {
-        const variantsList = res[0].values.map(v => ({ id: v[0], name: v[1], url: v[2], batteryConfig: v[3] }));
+        const variantsList = res[0].values.map(v => ({ id: v[0], name: v[1], url: v[2], batteryConfig: v[3], packConfig: v[4], nominalVoltage: v[5], cathode: v[6], grossKwh: v[7] }));
         setVariants(variantsList);
         // Only clear selected variant if it's not in the new list
         if (selectedVariant && !variantsList.find(v => v.id === selectedVariant)) {
@@ -1012,6 +1206,12 @@ export default function EVChargingCalculator() {
     } else {
       setBatteryConfiguration('');
     }
+
+    // Update pack electrical data used for voltage / current estimation
+    setPackConfiguration(variantObj?.packConfig || '');
+    setNominalVoltageV(variantObj?.nominalVoltage ?? null);
+    setCathodeMaterial(variantObj?.cathode || '');
+    setPackGrossKwh(variantObj?.grossKwh ?? null);
 
     // Reset user edits when variant changes
     setUserEditedCurve(null);
@@ -1225,47 +1425,105 @@ export default function EVChargingCalculator() {
   };
 
   // --- Calculations ---
+
+  // Peak DC power the vehicle asks for - used to spot packs that reconfigure
+  // to a higher voltage for DC charging.
+  const peakCurveKw = useMemo(
+    () => (curveData.length ? Math.max(...curveData.map(p => p.kw)) : null),
+    [curveData]
+  );
+
+  // Estimated pack voltage from chemistry + pack configuration.
+  const voltageModel = useMemo(
+    () => buildVoltageModel({
+      packConfiguration,
+      nominalVoltageV,
+      cathodeMaterial,
+      // Gross energy drives the internal resistance estimate; usable is a
+      // close enough stand-in when the database has no gross figure.
+      packEnergyKwh: packGrossKwh || (batterySize ? batterySize / 0.94 : null),
+      peakDcPowerKw: peakCurveKw,
+    }),
+    [packConfiguration, nominalVoltageV, cathodeMaterial, packGrossKwh, batterySize, peakCurveKw]
+  );
+
+  const currentLimiter = useMemo(
+    () => makeCurrentLimiter({
+      enabled: limitByCurrent,
+      initialCurrentA: initialCurrentLimit,
+      deratedCurrentA: deratedCurrentLimit,
+      derateAfterMinutes: currentDerateTime,
+    }),
+    [limitByCurrent, initialCurrentLimit, deratedCurrentLimit, currentDerateTime]
+  );
+
+  // Full session walk: powers, voltages, currents and time at every curve point.
+  const simulation = useMemo(() => simulateCharge({
+    curve: curveData,
+    batteryKwh: batterySize,
+    chargerPowerKw: chargerPower,
+    startSoc,
+    stopSoc,
+    endSoc: 100,
+    voltageModel,
+    currentLimiter,
+    dwellMinutes: dwellTime,
+  }), [curveData, batterySize, chargerPower, startSoc, stopSoc, voltageModel, currentLimiter, dwellTime]);
+
+  // The same session with nothing but the vehicle's own curve in the way - no
+  // station power ceiling and no current limit. The gap against `simulation` is
+  // the time the limits cost.
+  const idealSimulation = useMemo(() => simulateCharge({
+    curve: curveData,
+    batteryKwh: batterySize,
+    chargerPowerKw: Infinity,
+    startSoc,
+    stopSoc,
+    endSoc: stopSoc,
+    voltageModel,
+    currentLimiter: null,
+    dwellMinutes: dwellTime,
+  }), [curveData, batterySize, startSoc, stopSoc, voltageModel, dwellTime]);
+
   const result = useMemo(() => {
-    const safeStart = Math.min(startSoc, 99);
-    const safeStop = Math.max(safeStart + 1, stopSoc);
-    if (stopSoc <= startSoc || curveData.length === 0) return { timeMins: 0, kwhAdded: 0, rangeAdded: 0, rangeAddedKm: 0, avgSpeed: 0, avgSpeedMph: 0, avgSpeedKph: 0 };
-
-    let totalHours = 0;
-    
-    const getKwAtSoc = (s) => {
-        const p = curveData.find(x => x.soc === s);
-        if (p) return p.kw;
-        const lower = curveData.filter(x => x.soc < s).pop();
-        const upper = curveData.find(x => x.soc > s);
-        if (!lower) return upper ? upper.kw : 0;
-        if (!upper) return lower.kw;
-        return lower.kw + (upper.kw - lower.kw) * ((s - lower.soc) / (upper.soc - lower.soc));
-    };
-
-    const energyPerStep = batterySize * 0.01;
-
-    for (let i = safeStart; i < safeStop; i++) {
-      const carCapability = getKwAtSoc(i);
-      const actualPower = Math.min(carCapability, chargerPower);
-      const powerSafe = Math.max(1, actualPower); 
-      totalHours += energyPerStep / powerSafe; 
+    if (stopSoc <= startSoc || curveData.length === 0) {
+      return {
+        timeMins: 0, idealTimeMins: 0, lostMins: 0,
+        kwhAdded: 0, rangeAdded: 0, rangeAddedKm: 0,
+        avgSpeed: 0, avgSpeedMph: 0, avgSpeedKph: 0,
+        peakCurrentA: null, avgCurrentA: null, peakPowerKw: 0,
+        minVoltageV: null, maxVoltageV: null,
+      };
     }
 
-    // Include Dwell Time
-    totalHours += dwellTime / 60;
+    const safeStart = Math.min(startSoc, 99);
+    const safeStop = Math.max(safeStart + 1, stopSoc);
 
-    const timeMins = totalHours * 60;
+    // Dwell time counts against the session averages, as before.
+    const totalHours = simulation.timeMins / 60;
     const kwhAdded = (safeStop - safeStart) / 100 * batterySize;
     const maxRangeMi = maxRangeUnit === 'mi' ? maxRange : maxRange * 0.621371;
     const rangeAdded = (safeStop - safeStart) / 100 * maxRangeMi;
     const rangeAddedKm = rangeAdded * 1.60934;
-    const avgSpeed = kwhAdded / totalHours;
-    
-    const avgSpeedMph = totalHours > 0 ? rangeAdded / totalHours : 0;
-    const avgSpeedKph = totalHours > 0 ? rangeAddedKm / totalHours : 0;
 
-    return { timeMins, kwhAdded, rangeAdded, rangeAddedKm, avgSpeed, avgSpeedMph, avgSpeedKph };
-  }, [startSoc, stopSoc, batterySize, maxRange, maxRangeUnit, chargerPower, curveData, dwellTime]);
+    return {
+      timeMins: simulation.timeMins,
+      idealTimeMins: idealSimulation.timeMins,
+      // Dwell time sits in both, so it cancels out of the difference.
+      lostMins: Math.max(0, simulation.timeMins - idealSimulation.timeMins),
+      kwhAdded,
+      rangeAdded,
+      rangeAddedKm,
+      avgSpeed: totalHours > 0 ? kwhAdded / totalHours : 0,
+      avgSpeedMph: totalHours > 0 ? rangeAdded / totalHours : 0,
+      avgSpeedKph: totalHours > 0 ? rangeAddedKm / totalHours : 0,
+      peakCurrentA: simulation.peakCurrentA,
+      avgCurrentA: simulation.avgCurrentA,
+      peakPowerKw: simulation.peakPowerKw,
+      minVoltageV: simulation.minVoltageV,
+      maxVoltageV: simulation.maxVoltageV,
+    };
+  }, [startSoc, stopSoc, batterySize, maxRange, maxRangeUnit, curveData, simulation, idealSimulation]);
 
   // --- Road Trip Calculations ---
   const roadTripResult = useMemo(() => {
@@ -1393,7 +1651,8 @@ export default function EVChargingCalculator() {
                    (SELECT energy_charged_kwh FROM charging_curve WHERE vehicle_id = v.id AND soc_percent = 100 LIMIT 1),
                    v.battery_net_kwh
                  ) as battery_usable,
-                 v.country, v.battery_configuration, v.drag_coefficient
+                 v.country, v.battery_configuration, v.drag_coefficient,
+                 v.pack_configuration, v.nominal_voltage_v, v.cathode_material, v.battery_gross_kwh
           FROM vehicles v
           WHERE v.battery_net_kwh >= ${Number(minBatteryCapacity) || 0}
           AND v.battery_net_kwh <= ${Number(maxBatteryCapacity) || 999}
@@ -1417,8 +1676,18 @@ export default function EVChargingCalculator() {
           battery: row[4],
           country: row[5],
           batteryConfig: row[6],
-          dragCoefficient: row[7]
+          dragCoefficient: row[7],
+          packConfiguration: row[8],
+          nominalVoltageV: row[9],
+          cathodeMaterial: row[10],
+          grossKwh: row[11]
         }));
+
+        // Optional charger current cap, shared by every vehicle in the run
+        const boardCurrentLimiter = makeCurrentLimiter({
+          enabled: leaderboardLimitCurrent,
+          initialCurrentA: leaderboardMaxCurrent,
+        });
 
         console.log('Total vehicles found:', vehicles.length);
 
@@ -1471,37 +1740,35 @@ export default function EVChargingCalculator() {
 
           const rangeMi = rangeKm * 0.621371;
 
-          // Interpolate kW at any SOC
-          const getKwAtSoc = (s) => {
-            const p = curve.find(x => x.soc === s);
-            if (p) return p.kw;
-            const lower = curve.filter(x => x.soc < s).pop();
-            const upper = curve.find(x => x.soc > s);
-            if (!lower) return upper ? upper.kw : 0;
-            if (!upper) return lower.kw;
-            return lower.kw + (upper.kw - lower.kw) * ((s - lower.soc) / (upper.soc - lower.soc));
-          };
-
           // Calculate charging metrics for leaderboard SOC range
           const safeStart = Math.min(leaderboardStartSoc, 99);
           const safeStop = Math.max(safeStart + 1, leaderboardStopSoc);
-          
+
           if (vehicle.battery === 0 || vehicle.battery === null) return null;
-          
-          const energyPerStep = vehicle.battery * 0.01;
-          let totalHours = 0;
 
-          for (let i = safeStart; i < safeStop; i++) {
-            const carCapability = getKwAtSoc(i);
-            const actualPower = Math.min(carCapability, leaderboardChargerPower);
-            const powerSafe = Math.max(1, actualPower);
-            totalHours += energyPerStep / powerSafe;
-          }
+          const vModel = buildVoltageModel({
+            packConfiguration: vehicle.packConfiguration,
+            nominalVoltageV: vehicle.nominalVoltageV,
+            cathodeMaterial: vehicle.cathodeMaterial,
+            packEnergyKwh: vehicle.grossKwh || vehicle.battery / 0.94,
+            peakDcPowerKw: curve.length ? Math.max(...curve.map(p => p.kw)) : null
+          });
 
-          const timeMins = totalHours * 60;
-          const kwhAdded = (safeStop - safeStart) / 100 * vehicle.battery;
+          const sim = simulateCharge({
+            curve,
+            batteryKwh: vehicle.battery,
+            chargerPowerKw: leaderboardChargerPower,
+            startSoc: safeStart,
+            stopSoc: safeStop,
+            endSoc: safeStop,
+            voltageModel: vModel,
+            currentLimiter: boardCurrentLimiter
+          });
+
+          const timeMins = sim.chargeMins;
+          const totalHours = timeMins / 60;
           const rangeAdded = (safeStop - safeStart) / 100 * rangeMi;
-          const avgPower = totalHours > 0 ? kwhAdded / totalHours : 0;
+          const avgPower = sim.avgPowerKw;
           const rangePerHour = totalHours > 0 ? rangeAdded / totalHours : 0;
           const efficiency = vehicle.battery > 0 ? rangeMi / vehicle.battery : 0;
           const timePerKwh = vehicle.battery > 0 ? timeMins / vehicle.battery : 0;
@@ -1523,6 +1790,10 @@ export default function EVChargingCalculator() {
             rangeAdded,
             efficiency,
             timePerKwh,
+            peakCurrent: sim.peakCurrentA,
+            avgCurrent: sim.avgCurrentA,
+            nominalPackV: vModel ? vModel.nominalPackV : null,
+            chemistryLabel: vModel ? vModel.chemistryLabel : null,
             curve: curve // Store curve data for tooltip
           };
         }).filter(r => r !== null);
@@ -1531,34 +1802,33 @@ export default function EVChargingCalculator() {
         const customResults = customLeaderboardVehicles.map(vehicle => {
           const curve = vehicle.curve;
           const rangeMi = vehicle.range; // Already in miles
-          
-          const getKwAtSoc = (s) => {
-            const p = curve.find(x => x.soc === s);
-            if (p) return p.kw;
-            const lower = curve.filter(x => x.soc < s).pop();
-            const upper = curve.find(x => x.soc > s);
-            if (!lower) return upper ? upper.kw : 0;
-            if (!upper) return lower.kw;
-            return lower.kw + (upper.kw - lower.kw) * ((s - lower.soc) / (upper.soc - lower.soc));
-          };
 
           const safeStart = Math.min(leaderboardStartSoc, 99);
           const safeStop = Math.max(safeStart + 1, leaderboardStopSoc);
-          
-          const energyPerStep = vehicle.battery * 0.01;
-          let totalHours = 0;
 
-          for (let i = safeStart; i < safeStop; i++) {
-            const carCapability = getKwAtSoc(i);
-            const actualPower = Math.min(carCapability, leaderboardChargerPower);
-            const powerSafe = Math.max(1, actualPower);
-            totalHours += energyPerStep / powerSafe;
-          }
+          const vModel = buildVoltageModel({
+            packConfiguration: vehicle.packConfiguration,
+            nominalVoltageV: vehicle.nominalVoltageV,
+            cathodeMaterial: vehicle.cathodeMaterial,
+            packEnergyKwh: vehicle.grossKwh || vehicle.battery / 0.94,
+            peakDcPowerKw: curve.length ? Math.max(...curve.map(p => p.kw)) : null
+          });
 
-          const timeMins = totalHours * 60;
-          const kwhAdded = (safeStop - safeStart) / 100 * vehicle.battery;
+          const sim = simulateCharge({
+            curve,
+            batteryKwh: vehicle.battery,
+            chargerPowerKw: leaderboardChargerPower,
+            startSoc: safeStart,
+            stopSoc: safeStop,
+            endSoc: safeStop,
+            voltageModel: vModel,
+            currentLimiter: boardCurrentLimiter
+          });
+
+          const timeMins = sim.chargeMins;
+          const totalHours = timeMins / 60;
           const rangeAdded = (safeStop - safeStart) / 100 * rangeMi;
-          const avgPower = totalHours > 0 ? kwhAdded / totalHours : 0;
+          const avgPower = sim.avgPowerKw;
           const rangePerHour = totalHours > 0 ? rangeAdded / totalHours : 0;
           const efficiency = vehicle.battery > 0 ? rangeMi / vehicle.battery : 0;
           const timePerKwh = vehicle.battery > 0 ? timeMins / vehicle.battery : 0;
@@ -1578,6 +1848,10 @@ export default function EVChargingCalculator() {
             rangeAdded,
             efficiency,
             timePerKwh,
+            peakCurrent: sim.peakCurrentA,
+            avgCurrent: sim.avgCurrentA,
+            nominalPackV: vModel ? vModel.nominalPackV : null,
+            chemistryLabel: vModel ? vModel.chemistryLabel : null,
             curve: curve,
             isCustom: true,
             customTag: vehicle.customTag
@@ -1592,6 +1866,10 @@ export default function EVChargingCalculator() {
           sorted.sort((a, b) => a.timeMins - b.timeMins);
         } else if (leaderboardMetric === 'highest-avg-power') {
           sorted.sort((a, b) => b.avgPower - a.avgPower);
+        } else if (leaderboardMetric === 'highest-charging-current') {
+          // Only vehicles with enough pack data to estimate a voltage qualify
+          sorted = sorted.filter(v => Number.isFinite(v.peakCurrent));
+          sorted.sort((a, b) => b.peakCurrent - a.peakCurrent);
         } else if (leaderboardMetric === 'best-range-per-hour') {
           sorted.sort((a, b) => b.rangePerHour - a.rangePerHour);
         } else if (leaderboardMetric === 'most-efficient') {
@@ -1613,13 +1891,20 @@ export default function EVChargingCalculator() {
           const roundedBattery = Math.round(vehicle.battery * 2) / 2; // 0.5 kWh precision
           
           // Find existing group with same battery and time
+          // Peak current depends on pack voltage, so identical battery+time rows
+          // can still differ on the current leaderboard - keep those separate.
+          const roundedCurrent = Number.isFinite(vehicle.peakCurrent) ? Math.round(vehicle.peakCurrent) : null;
+          const groupOnCurrent = leaderboardMetric === 'highest-charging-current';
+
           const existingGroup = perfGroups.find(g => {
             const gRoundedTime = Math.round(g.timeMins * 20) / 20;
             const gRoundedBattery = Math.round(g.battery * 2) / 2;
-            
+            const gRoundedCurrent = Number.isFinite(g.peakCurrent) ? Math.round(g.peakCurrent) : null;
+
             // Combine if battery and time match
-            return gRoundedBattery === roundedBattery && 
-                   gRoundedTime === roundedTime;
+            return gRoundedBattery === roundedBattery &&
+                   gRoundedTime === roundedTime &&
+                   (!groupOnCurrent || gRoundedCurrent === roundedCurrent);
           });
           
           if (existingGroup) {
@@ -1665,6 +1950,8 @@ export default function EVChargingCalculator() {
           perfGroups.sort((a, b) => a.timeMins - b.timeMins);
         } else if (leaderboardMetric === 'highest-avg-power') {
           perfGroups.sort((a, b) => b.avgPower - a.avgPower);
+        } else if (leaderboardMetric === 'highest-charging-current') {
+          perfGroups.sort((a, b) => b.peakCurrent - a.peakCurrent);
         } else if (leaderboardMetric === 'best-range-per-hour') {
           perfGroups.sort((a, b) => b.rangePerHour - a.rangePerHour);
         } else if (leaderboardMetric === 'most-efficient') {
@@ -2066,14 +2353,74 @@ export default function EVChargingCalculator() {
                     onChange={setChargerPower} 
                     min={20} max={600} step={10} unit="kW" 
                   />
-                   <InputGroup 
-                    label="Dwell Time" 
-                    value={dwellTime} 
-                    onChange={setDwellTime} 
-                    min={0} max={30} step={1} unit="min" 
+                   <InputGroup
+                    label="Dwell Time"
+                    value={dwellTime}
+                    onChange={setDwellTime}
+                    min={0} max={30} step={1} unit="min"
                     subtext="Non-charging delay (park, pay, etc)"
                   />
-                  
+
+                  {/* Charging Current Limit */}
+                  <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                    <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={limitByCurrent}
+                        onChange={(e) => setLimitByCurrent(e.target.checked)}
+                        className="w-3 h-3 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-1 focus:ring-blue-500 dark:bg-slate-700"
+                      />
+                      Limit by Current
+                    </label>
+                    {!voltageModel && (
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                        No pack voltage data for this vehicle - current limits cannot be applied.
+                      </p>
+                    )}
+                    {limitByCurrent && (
+                      <div className="mt-2 space-y-2 animate-in fade-in slide-in-from-top-2">
+                        <div className="flex gap-2">
+                          <div className="flex-1">
+                            <NumberInput
+                              label="Initial Current"
+                              value={initialCurrentLimit}
+                              onChange={setInitialCurrentLimit}
+                              unit="A"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <NumberInput
+                              label="Derated Current"
+                              value={deratedCurrentLimit}
+                              onChange={setDeratedCurrentLimit}
+                              unit="A"
+                            />
+                          </div>
+                        </div>
+                        <InputGroup
+                          label="Derate After"
+                          value={currentDerateTime}
+                          onChange={setCurrentDerateTime}
+                          min={0} max={60} step={1} unit="min"
+                          subtext="Initial current holds until this point, then derates"
+                        />
+                      </div>
+                    )}
+                    {voltageModel && (
+                      <div className="mt-2 text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed">
+                        Est. pack: {Math.round(voltageModel.nominalPackV)} V nominal
+                        {' '}({Math.round(voltageModel.minPackV)}-{Math.round(voltageModel.maxPackV)} V open circuit)
+                        {' • '}{voltageModel.chemistryLabel}{!voltageModel.chemistryKnown && ' (assumed)'}
+                        {voltageModel.seriesFromDb && ` • ${voltageModel.seriesCount}s`}
+                        {voltageModel.dcReconfigured && (
+                          <span className="block text-amber-600 dark:text-amber-400 mt-0.5">
+                            Pack appears to switch its halves into series for DC charging
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   {mode === 'custom' && (
                     <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
                       <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">
@@ -2164,23 +2511,60 @@ export default function EVChargingCalculator() {
 
             <div className="lg:col-span-8 space-y-6">
               <Card className="p-6 bg-white dark:bg-slate-800">
-                <div className="flex justify-between items-center mb-2">
+                <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
                   <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Charging Session</h2>
-                  <div className="flex gap-4 text-sm">
+                  <div className="flex items-center gap-4 text-sm flex-wrap">
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-slate-400 opacity-50"></div><span className="text-slate-500 dark:text-slate-400">Vehicle Limit</span></div>
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-blue-500"></div><span className="text-slate-800 dark:text-slate-200 font-medium">Actual Speed</span></div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500">Y</span>
+                      <div className="flex gap-0.5 bg-slate-100 dark:bg-slate-700 rounded p-0.5">
+                        <button
+                          onClick={() => setChartYAxis('power')}
+                          className={`text-[10px] px-2 py-0.5 rounded transition-colors font-medium ${chartYAxis === 'power' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                          Power
+                        </button>
+                        <button
+                          onClick={() => setChartYAxis('current')}
+                          disabled={!voltageModel}
+                          className={`text-[10px] px-2 py-0.5 rounded transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed ${chartYAxis === 'current' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                          title={voltageModel ? 'Plot charging current' : 'No pack voltage data for this vehicle'}
+                        >
+                          Current
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500">X</span>
+                      <div className="flex gap-0.5 bg-slate-100 dark:bg-slate-700 rounded p-0.5">
+                        <button
+                          onClick={() => setChartXAxis('soc')}
+                          className={`text-[10px] px-2 py-0.5 rounded transition-colors font-medium ${chartXAxis === 'soc' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                          SoC
+                        </button>
+                        <button
+                          onClick={() => setChartXAxis('time')}
+                          className={`text-[10px] px-2 py-0.5 rounded transition-colors font-medium ${chartXAxis === 'time' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                          Time
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 {mode === 'custom' && (
                   <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
                     ⓘ Charging curve can be customized by dragging points on the graph
+                    {(chartXAxis === 'time' || chartYAxis === 'current') && ' (switch the axes back to SoC / Power to edit)'}
                   </p>
                 )}
 
-                <ChargingCurveChart 
-                  curveData={curveData} 
-                  startSoc={startSoc} 
-                  stopSoc={stopSoc} 
+                <ChargingCurveChart
+                  curveData={curveData}
+                  startSoc={startSoc}
+                  stopSoc={stopSoc}
                   chargerMaxPower={chargerPower}
                   darkMode={darkMode}
                   isCustomMode={mode === 'custom'}
@@ -2188,6 +2572,10 @@ export default function EVChargingCalculator() {
                   editedPoints={editedPointsSet}
                   setEditedPoints={setEditedPointsSet}
                   onClearEdits={clearCurveEdits}
+                  simulation={simulation}
+                  currentLimiter={currentLimiter}
+                  xAxis={chartXAxis}
+                  yAxis={voltageModel ? chartYAxis : 'power'}
                 />
 
                 <div className="mt-6 px-2 relative h-12 select-none">
@@ -2231,7 +2619,24 @@ export default function EVChargingCalculator() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card className="p-4 border-l-4 border-l-blue-500">
                   <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><Clock size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Time</span></div>
-                  <div className="flex items-baseline gap-1"><span className="text-3xl font-bold text-slate-800 dark:text-slate-100">{formatTime(result.timeMins)}</span></div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-bold text-slate-800 dark:text-slate-100">{formatTime(result.timeMins)}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">actual</span>
+                  </div>
+                  <div className="space-y-1 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">Ideal</span>
+                      <span className="font-mono text-slate-600 dark:text-slate-300">{formatTime(result.idealTimeMins)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">Lost to limits</span>
+                      {result.lostMins > 1 / 60 ? (
+                        <span className="font-mono font-bold text-amber-600 dark:text-amber-400">+{formatTime(result.lostMins)}</span>
+                      ) : (
+                        <span className="font-mono text-emerald-600 dark:text-emerald-400">none</span>
+                      )}
+                    </div>
+                  </div>
                 </Card>
                 
                 <Card className="p-4 border-l-4 border-l-emerald-500">
@@ -2260,6 +2665,75 @@ export default function EVChargingCalculator() {
                   </div>
                 </Card>
               </div>
+
+              {/* Estimated pack voltage / current */}
+              <div className="mt-6 mb-0.5">
+                <h3 className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">Estimated Pack Voltage &amp; Current</h3>
+              </div>
+              {voltageModel ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Card className="p-4 border-l-4 border-l-amber-500">
+                    <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-amber-100 text-amber-600 rounded-lg"><Activity size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Peak Current</span></div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-3xl font-bold text-slate-800 dark:text-slate-100">{result.peakCurrentA != null ? result.peakCurrentA.toFixed(0) : '--'}</span>
+                      <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">A</span>
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      Avg {result.avgCurrentA != null ? result.avgCurrentA.toFixed(0) : '--'} A over {startSoc}–{stopSoc}%
+                    </div>
+                  </Card>
+
+                  <Card className="p-4 border-l-4 border-l-cyan-500">
+                    <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-cyan-100 text-cyan-600 rounded-lg"><Zap size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Pack Voltage</span></div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center text-xs border-b border-slate-100 dark:border-slate-700 pb-1 mb-1">
+                        <span className="text-slate-500 dark:text-slate-400">Nominal</span>
+                        <span className="font-bold text-slate-700 dark:text-slate-200">{voltageModel.nominalPackV.toFixed(0)} V</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 dark:text-slate-400">Under load</span>
+                        <span className="font-mono text-slate-600 dark:text-slate-300">
+                          {result.minVoltageV != null ? result.minVoltageV.toFixed(0) : '--'}–{result.maxVoltageV != null ? result.maxVoltageV.toFixed(0) : '--'} V
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 dark:text-slate-400">Pack resistance</span>
+                        <span className="font-mono text-slate-600 dark:text-slate-300">
+                          {voltageModel.resistanceOhms != null ? `${(voltageModel.resistanceOhms * 1000).toFixed(0)} mΩ` : '--'}
+                        </span>
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card className="p-4 border-l-4 border-l-slate-400">
+                    <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-slate-100 text-slate-600 rounded-lg"><Battery size={20} /></div><span className="text-slate-500 dark:text-slate-400 text-sm font-medium">Pack Config</span></div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center text-xs border-b border-slate-100 dark:border-slate-700 pb-1 mb-1">
+                        <span className="text-slate-500 dark:text-slate-400">Chemistry</span>
+                        <span className="font-bold text-slate-700 dark:text-slate-200">{voltageModel.chemistryLabel}{!voltageModel.chemistryKnown && '*'}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 dark:text-slate-400">Layout</span>
+                        <span className="font-mono text-slate-600 dark:text-slate-300">
+                          {voltageModel.dcReconfigured
+                            ? `${voltageModel.seriesCount}s${voltageModel.parallelCount ? voltageModel.parallelCount + 'p' : ''} on DC`
+                            : (packConfiguration || `${voltageModel.seriesCount}s (est)`)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500 dark:text-slate-400">Cell nominal</span>
+                        <span className="font-mono text-slate-600 dark:text-slate-300">{voltageModel.cellNominalV.toFixed(2)} V</span>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              ) : (
+                <Card className="p-4">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    This vehicle has no pack voltage or cell configuration data, so voltage and current cannot be estimated.
+                  </p>
+                </Card>
+              )}
 
               {/* Road Trip Results */}
               {tripMode === 'roadtrip' && (
@@ -2489,6 +2963,7 @@ export default function EVChargingCalculator() {
                       >
                         <option value="fastest-charging">⚡ Fastest Charging Time</option>
                         <option value="highest-avg-power">🔋 Highest Average Power</option>
+                        <option value="highest-charging-current">🔌 Highest Charging Current</option>
                         <option value="best-range-per-hour">🏁 Best Range Per Hour</option>
                         <option value="most-efficient">🍃 Most Efficient</option>
                         <option value="speed-efficiency">🚀 Speed × Efficiency</option>
@@ -2585,6 +3060,40 @@ export default function EVChargingCalculator() {
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Charger Maximum Current Filter */}
+                  <div className="mb-3">
+                    <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={leaderboardLimitCurrent}
+                        onChange={(e) => { setLeaderboardLimitCurrent(e.target.checked); setLeaderboardResults([]); }}
+                        className="w-3 h-3 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-1 focus:ring-blue-500 dark:bg-slate-700"
+                      />
+                      Charger Maximum Current
+                    </label>
+                    {leaderboardLimitCurrent && (
+                      <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                        <div className="relative">
+                          <input
+                            type="range"
+                            min="50" max="1000" step="10"
+                            value={leaderboardMaxCurrent}
+                            onChange={(e) => { setLeaderboardMaxCurrent(Number(e.target.value)); setLeaderboardResults([]); }}
+                            className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer"
+                          />
+                          <div className="flex justify-between items-center mt-2">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">50 A</span>
+                            <span className="text-base font-bold text-slate-700 dark:text-slate-200">{leaderboardMaxCurrent} A</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400">1000 A</span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                            Caps power at current × estimated pack voltage. Vehicles without pack data are unaffected.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Vehicle Count Slider */}
@@ -2978,6 +3487,7 @@ export default function EVChargingCalculator() {
                   <h3 className="text-lg font-semibold mb-4 text-slate-700 dark:text-slate-300">
                     {leaderboardMetric === 'fastest-charging' && '⚡ Fastest Charging Times'}
                     {leaderboardMetric === 'highest-avg-power' && '🔋 Highest Average Power'}
+                    {leaderboardMetric === 'highest-charging-current' && '🔌 Highest Charging Current'}
                     {leaderboardMetric === 'best-range-per-hour' && '🏁 Best Range Per Hour'}
                     {leaderboardMetric === 'most-efficient' && '🍃 Most Efficient Vehicles'}
                     {leaderboardMetric === 'speed-efficiency' && '🚀 Best Speed × Efficiency'}
@@ -3017,6 +3527,13 @@ export default function EVChargingCalculator() {
                               <>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Avg Power</th>
                                 <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Charging Speed</th>
+                              </>
+                            )}
+                            {leaderboardMetric === 'highest-charging-current' && (
+                              <>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Peak Current</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Pack Voltage</th>
+                                <th className="text-left py-2 px-2 font-semibold text-slate-700 dark:text-slate-300">Avg Power</th>
                               </>
                             )}
                             {leaderboardMetric === 'best-range-per-hour' && (
@@ -3141,6 +3658,21 @@ export default function EVChargingCalculator() {
                                   </td>
                                 </>
                               )}
+                              {leaderboardMetric === 'highest-charging-current' && (
+                                <>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200 text-lg">{Number.isFinite(vehicle.peakCurrent) ? vehicle.peakCurrent.toFixed(0) : 'N/A'}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> A</span></div>
+                                    <div><span className="text-slate-500 dark:text-slate-400 text-xs">avg {Number.isFinite(vehicle.avgCurrent) ? vehicle.avgCurrent.toFixed(0) : '--'}</span><span className="text-[10px] text-slate-400 dark:text-slate-500"> A</span></div>
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{Number.isFinite(vehicle.nominalPackV) ? vehicle.nominalPackV.toFixed(0) : 'N/A'}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> V</span></div>
+                                    <div className="text-[10px] text-slate-400 dark:text-slate-500">{vehicle.chemistryLabel || ''}</div>
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <div><span className="font-bold text-slate-700 dark:text-slate-200">{vehicle.avgPower.toFixed(1)}</span><span className="text-[10px] text-slate-700 dark:text-slate-200"> kW</span></div>
+                                  </td>
+                                </>
+                              )}
                               {leaderboardMetric === 'best-range-per-hour' && (
                                 <>
                                   <td className="py-3 px-2">
@@ -3253,6 +3785,10 @@ export default function EVChargingCalculator() {
                     {infoFeatureView === 'calculator' ? (
                       <ul className="list-disc list-inside space-y-1 ml-2">
                         <li>Charging performance metrics calculated using vehicle make, model, and variant specific charging curves</li>
+                        <li>Estimated pack voltage and charging current from the vehicle&apos;s cell chemistry and pack configuration, including the voltage rise under load</li>
+                        <li>Packs that switch to a higher voltage for DC charging (such as GM Ultium) are detected and modelled at their DC voltage</li>
+                        <li>Optional charging current limit, with a separate initial current and a time based derated current</li>
+                        <li>Toggle the graph between power and current, and between state of charge and elapsed charging time</li>
                         <li>Custom mode with editable battery capacity, range, and charging curves</li>
                         <li>Simple road trip planning with estimated charging stops</li>
                         <li>Comparison table to evaluate different vehicles and scenarios</li>
@@ -3260,9 +3796,9 @@ export default function EVChargingCalculator() {
                     ) : (
                       <ul className="list-disc list-inside space-y-1 ml-2">
                         <li>Compare top performing EVs across different charging metrics</li>
-                        <li>Filter by fastest charging time, highest average power, or best range per hour</li>
+                        <li>Filter by fastest charging time, highest average power, highest charging current, or best range per hour</li>
                         <li>Select different range scenarios to see performance in various driving conditions</li>
-                        <li>Adjust SOC range and charger power limits for custom comparisons</li>
+                        <li>Adjust SOC range, charger power, and charger maximum current limits for custom comparisons</li>
                         <li>Hover over vehicle names to preview their charging curves</li>
                         <li>Vehicles with identical performance are automatically combined in a single row</li>
                       </ul>
@@ -3295,8 +3831,22 @@ export default function EVChargingCalculator() {
 
                   <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
                     <p className="text-sm text-slate-500 dark:text-slate-500">
-                      Note: This tool provides estimates based on ideal conditions. Actual charging performance 
+                      Note: This tool provides estimates based on ideal conditions. Actual charging performance
                       may vary based on temperature, battery health, and charger capabilities.
+                    </p>
+                    <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">
+                      Voltage and current are estimates, not measurements. Pack voltage is modelled from the
+                      vehicle&apos;s nominal voltage and cell chemistry using a typical open circuit voltage curve,
+                      plus the voltage rise from an estimated pack internal resistance. That resistance is derived
+                      from the cell count and pack energy rather than measured, and it ignores how resistance
+                      climbs at low temperature and low state of charge.
+                    </p>
+                    <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">
+                      Some packs switch their halves from parallel into series for DC charging, doubling the
+                      voltage and halving the current. Where the recorded layout would demand more current than
+                      any DC connector can deliver and the pack has an even number of parallel strings, that
+                      switch is assumed and flagged in the results. Vehicles with no nominal voltage or pack
+                      configuration in the database are left out of the current based metrics.
                     </p>
                   </div>
                 </div>
