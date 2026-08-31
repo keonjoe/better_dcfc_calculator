@@ -53,3 +53,5 @@ ev_data.db
 test_*.py
 demo_*.py
 *.json
+*scraper*
+*.db-*
